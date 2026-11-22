@@ -1,26 +1,27 @@
-# Cuestionario de requisitos · Copi Autopint
+# Cuestionario Copi Autopint — NexusRD
 
-Web de recopilación de requisitos de Copi Autopint, desarrollada por NexusRD.
+Web Next.js exportada como sitio estático para GitHub Pages.
 
-## Inicio
+## Publicación
+
+En **Settings → Pages → Build and deployment → Source**, seleccionar **GitHub Actions**. Cada push a main ejecutará el flujo `.github/workflows/pages.yml` y publicará `out/` en https://nexusprord.github.io/copi-autopint-formulario/.
+
+## Configuración pendiente
+
+En **Settings → Secrets and variables → Actions → Variables**:
+- `GAS_QUESTIONS_URL`: URL pública de solo lectura del catálogo de preguntas de Apps Script.
+- `FORM_API_URL`: URL HTTPS de un intermediario seguro que recibe respuestas y guarda en GAS. Debe implementar autenticación, validación, limitación de peticiones y CORS para el dominio de Pages. **No poner el secreto de GAS en variables NEXT_PUBLIC ni en GitHub Pages**.
+- `NEXUS_WHATSAPP`: teléfono de WhatsApp de NexusRD en formato internacional, sin +.
+
+La versión estática no ejecuta rutas API de Next.js. El formulario muestra un error explícito si no se configura la lectura, y no permite guardar sin un endpoint seguro. **No entregar al cliente como formulario funcional hasta probar el ciclo completo** (preguntas, guardado, finalización y Sheets).
+
+## Desarrollo local
 
 ```bash
 npm install
-cp .env.example .env.local
 npm run dev
+npm run lint
+npm run build
 ```
 
-## Integración
-
-- `GET /api/questions` consulta el banco de preguntas activo del GAS.
-- `POST /api/answers` envía `guardar` o `finalizar` al GAS desde el servidor, con secreto protegido.
-- Configurar `GAS_WEB_APP_URL`, `GAS_API_SECRET` y `GAS_QUESTIONNAIRE_ID` en Vercel.
-- El cliente no recibe el secreto de GAS.
-- La web muestra estado de configuración cuando faltan variables; no simula guardados exitosos.
-- El botón final prepara un mensaje de WhatsApp; el usuario confirma el envío en WhatsApp.
-
-**Antes de producción:** comprobar esquema real de GAS R3, permisos, id de cuestionario, CORS/redirecciones de Apps Script, pruebas de finalización y protección contra abuso. No publicar datos sensibles ni habilitar el formulario público hasta aprobar pruebas.
-
-## Logo
-
-Colocar el logo original de NexusRD en `public/nexus-logo.png` (imagen aportada por el cliente del proyecto). Mientras tanto se muestra un monograma tipográfico.
+Logo de NexusRD enlazado desde el almacenamiento público facilitado por NexusRD. El formulario no debe contener secretos ni datos de clientes en el repositorio público.
