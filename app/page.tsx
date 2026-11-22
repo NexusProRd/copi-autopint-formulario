@@ -64,26 +64,13 @@ const PAGE_SIZE = 4;
 const FORM_VERSION = 'R5 · 22/11/2026';
 const STORAGE_KEY = 'copi-form-data-v3';
 const FINISHED_KEY = 'copi-form-finished';
+const OFFICIAL_WHATSAPP_NUMBER = '18295210521';
 const LABELS: Record<string, string> = {
   Inventario: 'Inventario y materiales',
   Nomina: 'Nómina y personal',
   Finanzas: 'Finanzas y gastos',
   Facturacion: 'Facturación y comprobantes',
 };
-
-function getWhatsAppNumber(): string {
-  if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem('copi-whatsapp-number');
-    if (stored) return stored;
-  }
-  return '';
-}
-
-function setWhatsAppNumber(num: string) {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('copi-whatsapp-number', num);
-  }
-}
 
 export default function Page() {
   const [questions, setQuestions] = useState<Q[]>([]);
@@ -95,8 +82,6 @@ export default function Page() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [finished, setFinished] = useState(false);
-  const [showWhatsAppConfig, setShowWhatsAppConfig] = useState(false);
-  const [whatsappNumber, setWhatsappNumber] = useState(getWhatsAppNumber());
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -436,12 +421,6 @@ export default function Page() {
   }
 
   async function shareViaWhatsApp() {
-    if (!whatsappConfigured) {
-      setNotice('Configura un número de WhatsApp válido antes de compartir. Actualmente no se ha configurado destinatario.');
-      setShowWhatsAppConfig(true);
-      return;
-    }
-
     const pdfBlob = await generatePDFBlob();
     const file = new File([pdfBlob], `Cuestionario_Copi_Autopint_${new Date().toISOString().split('T')[0]}.pdf`, { type: 'application/pdf' });
 
@@ -453,21 +432,21 @@ export default function Page() {
         return;
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return;
-        // AbortError means user cancelled; continue to fallback
       }
     }
 
-    const waUrl = `https://wa.me/${whatsappNumber.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+    const waUrl = `https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
 
     window.open(waUrl, '_blank', 'noopener,noreferrer');
-
-    setTimeout(() => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(file);
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    }, 500);
   }
 
   function generatePDFBlob(): Promise<Blob> {
@@ -614,37 +593,6 @@ export default function Page() {
     return Promise.resolve(doc.output('blob'));
   }
 
-  function handleWhatsAppNumberChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = e.target.value.replace(/\D/g, '');
-    setWhatsappNumber(val);
-  }
-
-  function saveWhatsAppNumber() {
-    setWhatsAppNumber(whatsappNumber);
-    setShowWhatsAppConfig(false);
-    setNotice('Número de WhatsApp guardado localmente.');
-  }
-
-  const whatsappConfigured = whatsappNumber.trim().length > 0 && whatsappNumber.replace(/\D/g, '').length >= 8;
-
-  const whatsappConfigPanel = showWhatsAppConfig ? (
-    <div className="panel" style={{ marginTop: '24px', background: '#f0f9f8', borderColor: '#129e91' }}>
-      <h3 style={{ marginTop: 0 }}>Configurar WhatsApp</h3>
-      <p className="help">Ingresa el número de WhatsApp (con código de país, sin + ni espacios). No se guarda en servidor; solo permanece en tu navegador.</p>
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          type="tel"
-          value={whatsappNumber}
-          onChange={handleWhatsAppNumberChange}
-          placeholder="Número de WhatsApp (código de país + número)"
-          style={{ flex: 1, minWidth: '200px', padding: '10px 12px', border: '1px solid #dce8e8', borderRadius: '8px', fontSize: '14px' }}
-        />
-        <button className="primary" onClick={saveWhatsAppNumber}><Check size={16} /> Guardar</button>
-        <button className="secondary" onClick={() => setShowWhatsAppConfig(false)}>Cancelar</button>
-      </div>
-    </div>
-  ) : null;
-
   if (loading) {
     return (
       <main className="shell">
@@ -708,31 +656,15 @@ export default function Page() {
             <p>Las respuestas se guardaron en tu navegador. Ahora puedes exportar los resultados.</p>
             <div className="actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '24px' }}>
               <button className="primary" onClick={exportPDF}><FileText size={18} /> Descargar PDF</button>
-              <button className="primary" onClick={exportExcel}><FileSpreadsheet size={18} /> Descargar Excel</button>
-              {whatsappConfigured ? (
-                <button className="primary link-button" onClick={shareViaWhatsApp}><Share2 size={18} /> Compartir por WhatsApp</button>
-              ) : (
-                <button className="primary link-button" onClick={() => setShowWhatsAppConfig(true)}><Share2 size={18} /> Configurar y compartir</button>
-              )}
+              <button className="primary" onClick={shareViaWhatsApp}><Share2 size={18} /> Enviar PDF al equipo de NexusRD</button>
             </div>
             <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
               Los datos se almacenan solo en este navegador. Si limpias los datos del sitio, se perderán.
             </p>
-            {whatsappConfigured && (
-              <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#129e91' }}>
-                WhatsApp configurado: <code>+{whatsappNumber.replace(/\D/g, '')}</code>
-                <button className="secondary" style={{ marginLeft: '12px', padding: '4px 8px', fontSize: '11px' }} onClick={() => setShowWhatsAppConfig(true)}>Cambiar</button>
-              </p>
-            )}
-            {!whatsappConfigured && (
-              <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#e67e22' }}>
-                Para compartir el PDF por WhatsApp: descarga el PDF, ábrelo con cualquier visor, compártelo desde la app de WhatsApp.
-                <button className="secondary" style={{ marginLeft: '12px', padding: '4px 8px', fontSize: '11px' }} onClick={() => setShowWhatsAppConfig(true)}>Configurar número</button>
-              </p>
-            )}
+            <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
+              Al enviar: se abrirá WhatsApp hacia el equipo de NexusRD (+1 829-521-0521). Si tu dispositivo no permite adjuntar el PDF, este se descargará para que lo adjuntes manualmente.
+            </p>
           </div>
-
-          {whatsappConfigPanel}
         </div>
       </main>
     );
@@ -888,20 +820,6 @@ export default function Page() {
             {stage === pages.length - 1 ? 'Finalizar cuestionario' : 'Guardar y continuar'}
           </button>
         </div>
-
-        {whatsappConfigPanel}
-
-        {!showWhatsAppConfig && !whatsappConfigured && (
-          <div className="panel" style={{ marginTop: '24px', background: '#fff8f0', borderColor: '#e67e22' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <AlertCircle size={20} style={{ color: '#e67e22' }} />
-              <span style={{ flex: 1, minWidth: '200px' }}>
-                <strong>WhatsApp no configurado:</strong> para compartir el PDF descarga el archivo y úsalo desde la app de WhatsApp; luego abre el chat con tu cliente.
-              </span>
-              <button className="secondary" onClick={() => setShowWhatsAppConfig(true)}>Configurar número</button>
-            </div>
-          </div>
-        )}
       </div>
       <footer>
         <span>© {new Date().getFullYear()} NexusRD · {FORM_VERSION}</span>

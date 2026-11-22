@@ -50,7 +50,7 @@ test.describe('Copi Autopint — Formulario funcional (Playwright)', () => {
     expect(size).toBeGreaterThan(0);
   });
 
-  test('TC-06: configura WhatsApp desde la pantalla final', async ({ page }) => {
+  test('TC-06: muestra los dos botones finales y envía el PDF al equipo de NexusRD', async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem('copi-form-data-v3', JSON.stringify({ answers: { GEN01: ['Inventario'] }, otherTexts: {} }));
       localStorage.setItem('copi-form-finished', 'true');
@@ -58,12 +58,19 @@ test.describe('Copi Autopint — Formulario funcional (Playwright)', () => {
     await page.goto(BASE + '/');
     await expect(page.getByRole('heading', { name: /Cuestionario completado/i })).toBeVisible();
 
-    await page.getByRole('button', { name: /Configurar y compartir/i }).click();
-    await expect(page.getByRole('heading', { name: 'Configurar WhatsApp' })).toBeVisible();
+    const downloadPdf = page.getByRole('button', { name: /Descargar PDF/i });
+    const enviarPdf = page.getByRole('button', { name: /Enviar PDF al equipo de NexusRD/i });
+    await expect(downloadPdf).toBeVisible();
+    await expect(enviarPdf).toBeVisible();
+    await expect(page.getByRole('button', { name: /Descargar Excel/i })).toHaveCount(0);
 
-    await page.locator('input[type="tel"]').fill('521555123456');
-    await page.getByRole('button', { name: /Guardar/i }).click();
-
-    await expect(page.getByText(/WhatsApp configurado/i)).toBeVisible();
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30000 }),
+      enviarPdf.click(),
+    ]);
+    const target = '/tmp/opencode/copi-autopint-test-enviar.pdf';
+    await download.saveAs(target);
+    const size = fs.statSync(target).size;
+    expect(size).toBeGreaterThan(0);
   });
 });
