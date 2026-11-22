@@ -171,9 +171,8 @@ export default function Page() {
     }
   }, [answers, otherTexts, stage, finished, questions.length]);
 
-  function reset(event: React.MouseEvent<HTMLAnchorElement>) {
-    event.preventDefault();
-    if (!window.confirm('¿Borrar todas las respuestas de este navegador y empezar de nuevo? Descarga primero una copia si deseas conservarlas.')) return;
+  function reset() {
+    setShowResetModal(false);
     try {
       for (const key of [DRAFT_KEY, STORAGE_KEY, LEGACY_FINISHED_KEY, 'copi-form-draft-v1', 'copi-form-draft-v2']) {
         localStorage.removeItem(key);
