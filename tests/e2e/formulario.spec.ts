@@ -100,11 +100,14 @@ for (const modules of [bank[0].options, ...bank[0].options.map(module => [module
         expected.set('INV02', 'No aplica');
         await next(page).click();
       }
-      if (step === totalSteps) page.once('dialog', dialog => dialog.accept());
       await next(page).click();
+      if (step === totalSteps) {
+        await expect(page.getByRole('alertdialog', { name: '¿Todo listo para finalizar?' })).toBeVisible();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Finalizar cuestionario' }).click();
+      }
     }
     await expect(page.getByRole('heading', { name: /Cuestionario completado/ })).toBeVisible();
-    await expect(page.getByRole('button')).toHaveCount(2);
+    await expect(page.getByRole('button', { name: 'Descargar PDF' })).toBeVisible();
     const original = await download(page, 'Descargar PDF');
     const ids = original.join(' ').match(/\b(?:GEN|INV|NOM|FIN|FAC)\d\d · ¿/g)!.map(x => x.slice(0, 5));
     expect([...new Set(ids)]).toEqual([...expected.keys()]);
