@@ -1,7 +1,7 @@
 name: Publicar cuestionario en GitHub Pages
 on:
   push:
-    branches: [main]
+    branches: [main, feat/offline-formulario]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,10 +24,6 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run lint
       - run: npm run build
-        env:
-          NEXT_PUBLIC_GAS_QUESTIONS_URL: https://script.google.com/macros/s/AKfycbzZFwXzl-Kn31qLCaipRAYmjQ8a2QWLlTfItUO3jopIYsPPy0fSXtjNvJ1fTminnpsx/exec
-          NEXT_PUBLIC_FORM_API_URL: ${{ vars.FORM_API_URL }}
-          NEXT_PUBLIC_NEXUS_WHATSAPP: ${{ vars.NEXUS_WHATSAPP }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
