@@ -17,3 +17,8 @@
 .modal-actions button:focus-visible,.modal-close:focus-visible{outline:3px solid #129e91;outline-offset:2px}
 @keyframes modal-enter{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:620px){.reset-modal{padding:26px 22px}.modal-actions{flex-direction:column}.modal-actions button{width:100%}}
+
+/* Acción de borrado: botón secundario sin estilos de enlace nativos */
+button.reset-draft{appearance:none;-webkit-appearance:none;border:1px solid transparent;background:transparent;color:#647b80;display:inline-flex;align-items:center;gap:8px;font:600 12px 'DM Sans',sans-serif;text-decoration:none;cursor:pointer;padding:9px 12px;border-radius:9px;box-shadow:none}
+button.reset-draft:hover{background:#eaf3f1;border-color:#d8e9e5;color:#245f60}
+button.reset-draft:focus-visible{outline:2px solid #129e91;outline-offset:2px}
