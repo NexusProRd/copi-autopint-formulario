@@ -1,33 +1,580 @@
 'use client';
-import {useEffect,useMemo,useRef,useState} from 'react';
-import {ArrowLeft,ArrowRight,Check,CheckCircle2,ClipboardList,LoaderCircle,Send,ShieldCheck} from 'lucide-react';
-type Question={ID?:string;id?:string;Seccion?:string;seccion?:string;Orden?:number;orden?:number;Pregunta?:string;pregunta?:string;Tipo?:string;tipo?:string;Opciones?:string|string[];opciones?:string|string[];Obligatoria?:string|boolean;obligatoria?:string|boolean;PermitirOtro?:string|boolean;permitirOtro?:string|boolean;Ayuda?:string;ayuda?:string;Ejemplo?:string;ejemplo?:string;Condicion?:string;condicion?:string};
-type Q={id:string;section:string;order:number;label:string;type:string;options:string[];required:boolean;allowOther:boolean;help:string;example:string;condition:string};
-const truth=(x:unknown)=>x===true||String(x).toLowerCase()==='si'||String(x).toLowerCase()==='sí'||String(x).toLowerCase()==='true';
-const val=(q:Question,a:keyof Question,b:keyof Question)=>q[a]??q[b];
-const normalize=(q:Question):Q=>({id:String(val(q,'ID','id')??''),section:String(val(q,'Seccion','seccion')??''),order:Number(val(q,'Orden','orden')??0),label:String(val(q,'Pregunta','pregunta')??''),type:String(val(q,'Tipo','tipo')??'texto').toLowerCase(),options:Array.isArray(val(q,'Opciones','opciones'))?val(q,'Opciones','opciones') as string[]:String(val(q,'Opciones','opciones')??'').split(/\s*[|;,]\s*/).filter(Boolean),required:truth(val(q,'Obligatoria','obligatoria')),allowOther:truth(val(q,'PermitirOtro','permitirOtro')),help:String(val(q,'Ayuda','ayuda')??''),example:String(val(q,'Ejemplo','ejemplo')??''),condition:String(val(q,'Condicion','condicion')??'')});
-function unpack(data:any):Question[]{if(Array.isArray(data))return data;if(Array.isArray(data?.preguntas))return data.preguntas;if(Array.isArray(data?.data?.preguntas))return data.data.preguntas;return []}
-const MODULES=['Inventario','Nomina','Finanzas','Facturacion'];
-const fold=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-const PAGE_SIZE=4;
-const FORM_VERSION='R4 · 22/11/2026';
-const LABELS:Record<string,string>={Inventario:'Inventario y materiales',Nomina:'Nómina y personal',Finanzas:'Finanzas y gastos',Facturacion:'Facturación y comprobantes'};
-export default function Page(){
- const [questions,setQuestions]=useState<Q[]>([]),[answers,setAnswers]=useState<Record<string,unknown>>({}),[otherTexts,setOtherTexts]=useState<Record<string,string>>({}),[stage,setStage]=useState(0),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[finished,setFinished]=useState(false);
- const initialized=useRef(false);
- useEffect(()=>{let alive=true;async function init(){try{const base=process.env.NEXT_PUBLIC_GAS_QUESTIONS_URL;if(!base)throw new Error('Falta configurar Google Apps Script.');const u=new URL(base);u.searchParams.set('accion','consultar');const response=await fetch(u.toString(),{cache:'no-store'});const data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.error||'No se pudo consultar Google Sheets.');const list=unpack(data).map(normalize).filter(q=>q.id&&q.label).sort((a,b)=>a.order-b.order);if(!list.length)throw new Error('Google Sheets no devolvió preguntas activas.');const ids=new Set(list.map(q=>q.id));if(ids.size!==list.length)throw new Error('Hay preguntas duplicadas en Sheets.');const counts={General:1,Inventario:14,Nomina:13,Finanzas:14,Facturacion:14};const incomplete=Object.entries(counts).filter(([name,count])=>list.filter(q=>fold(q.section)===fold(name)).length!==count);if(incomplete.length)throw new Error('El banco de preguntas está incompleto en Sheets: '+incomplete.map(([name,count])=>name+' (esperadas '+count+')').join(', ')+'. Solicita a NexusRD revisar la pestaña Preguntas.');let local:Record<string,unknown>={};let localOther:Record<string,string>={};try{const draft=JSON.parse(localStorage.getItem('copi-form-draft-v2')||'null');if(draft&&typeof draft==='object'){local=draft.answers||{};localOther=draft.otherTexts||{}}else{local=JSON.parse(localStorage.getItem('copi-form-draft-v1')||'{}')}}catch{}const remote:Record<string,unknown>={},remoteOther:Record<string,string>={};for(const [id,value] of Object.entries(data.respuestas||{})){remote[id]=(value as {valor?:unknown}).valor;remoteOther[id]=String((value as {otroTexto?:string}).otroTexto||'')}if(!alive)return;setQuestions(list);setAnswers({...remote,...local});setOtherTexts({...remoteOther,...localOther});setFinished(data.estado==='COMPLETADO');initialized.current=true;}catch(e){if(alive)setError(e instanceof Error?e.message:'No se pudo cargar el cuestionario.')}finally{if(alive)setLoading(false)}}init();return()=>{alive=false}},[]);
- useEffect(()=>{if(!initialized.current||finished)return;localStorage.setItem('copi-form-draft-v2',JSON.stringify({answers,otherTexts}))},[answers,otherTexts,finished]);
- const selected=Array.isArray(answers.GEN01)?answers.GEN01 as string[]:[];
- const pages=useMemo(()=>{const result:{key:string;name:string;items:Q[]}[]=[];const chunk=(key:string,name:string,items:Q[])=>{for(let i=0;i<items.length;i+=PAGE_SIZE){const total=Math.ceil(items.length/PAGE_SIZE);result.push({key:key+'-'+i,name:total>1?name+' · Parte '+(Math.floor(i/PAGE_SIZE)+1)+' de '+total:name,items:items.slice(i,i+PAGE_SIZE)})}};chunk('GEN','Servicios solicitados',questions.filter(q=>fold(q.section)==='general'));for(const m of MODULES){if(!selected.some(x=>fold(x)===fold(m)))continue;chunk(m,LABELS[m],questions.filter(q=>fold(q.section)===fold(m)))}return result},[questions,selected]);
- const current=pages[Math.min(stage,Math.max(0,pages.length-1))];const completed=Object.values(answers).filter(v=>Array.isArray(v)?v.length>0:String(v??'').trim().length>0).length;
- function change(q:Q,value:unknown){setAnswers(a=>({...a,[q.id]:value}));setNotice('')}
- function changeOther(id:string,value:string){setOtherTexts(a=>({...a,[id]:value}));setNotice('')}
- async function request(accion:string,fields:Record<string,string>={}){const endpoint=process.env.NEXT_PUBLIC_GAS_QUESTIONS_URL;if(!endpoint)throw new Error('No hay dirección de Google Apps Script.');const url=new URL(endpoint);url.searchParams.set('accion',accion);Object.entries(fields).forEach(([k,v])=>url.searchParams.set(k,v));const response=await fetch(url.toString(),{cache:'no-store'});const j=await response.json();if(!response.ok||j.ok===false)throw new Error(j.error||'No se pudo '+accion);return j}
- const hasOther=(q:Q)=>q.allowOther&&(answers[q.id]==='Otro'||Array.isArray(answers[q.id])&&(answers[q.id] as string[]).includes('Otro'));
- async function saveCurrent(){if(!current)return;for(const q of current.items){const value=answers[q.id];if(value===undefined)continue;const other=hasOther(q)?(otherTexts[q.id]||'').trim():'';if(hasOther(q)&&!other)throw new Error('Especifica la opción «Otro» en: '+q.label);await request('guardar',{preguntaId:q.id,valor:JSON.stringify(value),otroTexto:other})}}
- function goBack(){if(stage===0||busy)return;setStage(x=>Math.max(0,x-1));setNotice('Los cambios de esta etapa siguen en el navegador. Pulsa «Guardar y continuar» para sincronizarlos con Sheets.');window.scrollTo({top:0,behavior:'smooth'})}
- async function advance(){if(!current||busy)return;const missing=current.items.find(q=>q.required&&(Array.isArray(answers[q.id])?!(answers[q.id] as unknown[]).length:String(answers[q.id]??'').trim()===''));if(missing){setNotice('Completa la pregunta obligatoria: '+missing.label);document.getElementById(missing.id)?.scrollIntoView({behavior:'smooth',block:'center'});return}if(stage===pages.length-1&&!window.confirm('¿Confirmas que terminaste? Después de finalizar no podrás editar las respuestas.'))return;setBusy(true);setNotice('');try{await saveCurrent();if(stage<pages.length-1){setStage(x=>x+1);window.scrollTo({top:0,behavior:'smooth'})}else{const result=await request('finalizar');if(result.estado!=='COMPLETADO')throw new Error('El servidor no confirmó la finalización.');setFinished(true);localStorage.removeItem('copi-form-draft-v1');localStorage.removeItem('copi-form-draft-v2')}}catch(e){setNotice(e instanceof Error?e.message:'Error de conexión. Tus respuestas siguen en esta pantalla.')}finally{setBusy(false)}}
- const whatsapp=process.env.NEXT_PUBLIC_NEXUS_WHATSAPP;const message=encodeURIComponent('Hola, NexusRD. Hemos completado el cuestionario de requisitos de Copi Autopint. Por favor, confirmen su recepción.');
- return <main className="shell"><header className="topbar"><div className="brand"><img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" /><div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div></div><span className="secure"><ShieldCheck size={16}/> Cuestionario de requisitos</span></header><div className="container"><div className="eyebrow"><span className="dot"/> PROYECTO · COPI AUTOPINT</div><h1>Construyamos la solución <em>correcta.</em></h1><p className="intro">Queremos entender cómo trabaja tu negocio para diseñar un sistema que realmente te facilite el día a día. Responde con tranquilidad: cada pregunta incluye orientación.</p>
- {loading?<div className="panel centered"><LoaderCircle className="spin"/> Cargando cuestionario…</div>:error?<div className="panel centered error"><h2>El formulario aún no está disponible</h2><p>{error}</p><p>Comunícate con NexusRD para habilitarlo.</p></div>:finished?<div className="panel centered success"><div className="success-icon"><CheckCircle2 size={38}/></div><h2>¡Cuestionario completado!</h2><p>Las respuestas se registraron correctamente. Gracias por ayudarnos a conocer las necesidades de Copi Autopint.</p><p><strong>Último paso:</strong> notifica a NexusRD que terminaste.</p>{whatsapp?<a className="primary link-button" target="_blank" rel="noopener noreferrer" href={'https://wa.me/'+whatsapp+'?text='+message}><Send size={18}/> Notificar a NexusRD que completé el cuestionario</a>:<div className="notice">El botón de WhatsApp estará disponible cuando NexusRD configure el número de contacto.</div>}<small>WhatsApp abrirá un mensaje preparado; confirma su envío allí.</small></div>:<><div className="progress-info"><span>Paso {Math.min(stage+1,pages.length)} de {pages.length}</span><span>{completed} respuestas en el formulario</span></div><div className="progress"><div style={{width:((stage+1)/pages.length)*100+'%'}}/></div><div className="panel"><div className="section-heading"><div className="section-icon"><ClipboardList size={22}/></div><div><small>ETAPA {String(stage+1).padStart(2,'0')}</small><h2>{current?.name}</h2></div></div>{stage===0&&<p className="section-lead">Selecciona las áreas que necesitas. Solo te mostraremos las preguntas correspondientes.</p>}{current?.items.map((q,i)=><section className="question" key={q.id} id={q.id}><label className="question-title" htmlFor={'field-'+q.id}><span className="num">{String(i+1).padStart(2,'0')}</span>{q.label}{q.required&&<span className="required">*</span>}</label>{q.help&&<p className="help">{q.help}</p>}{q.id==='GEN01'||q.type.includes('multiple')||q.type.includes('checkbox')||q.type.includes('multi')?<div className="options">{(q.id==='GEN01'&&q.options.length===0?['Inventario','Nómina','Finanzas','Facturación']:q.options).concat(q.allowOther?['Otro']:[]).map(o=>{const chosen=Array.isArray(answers[q.id])?(answers[q.id] as string[]):[];return <label key={o} className={'option '+(chosen.includes(o)?'selected':'')}><input type="checkbox" value={o} checked={chosen.includes(o)} onChange={e=>change(q,e.target.checked?[...chosen,o]:chosen.filter(x=>x!==o))}/><span className="check">{chosen.includes(o)&&<Check size={14}/>}</span>{LABELS[fold(o)==='nomina'?'Nomina':fold(o)==='facturacion'?'Facturacion':o]??o}</label>})}{hasOther(q)&&<textarea rows={3} value={otherTexts[q.id]||''} onChange={e=>changeOther(q.id,e.target.value)} placeholder="Especifica cuál…" aria-label={'Especifica Otro: '+q.label}/>}</div>:q.type==='radio'||q.type.includes('select')||q.type.includes('opcion')||q.type.includes('lista')?<div className="options">{q.options.concat(q.allowOther?['Otro']:[]).map(o=><label key={o} className={'option '+(answers[q.id]===o?'selected':'')}><input type="radio" name={q.id} value={o} checked={answers[q.id]===o} onChange={()=>change(q,o)}/><span className="check">{answers[q.id]===o&&<Check size={14}/>}</span>{o}</label>)}{hasOther(q)&&<textarea rows={3} value={otherTexts[q.id]||''} onChange={e=>changeOther(q.id,e.target.value)} placeholder="Especifica cuál…" aria-label={'Especifica Otro: '+q.label}/>}</div>:q.type.includes('numero')||q.type.includes('número')?<input id={'field-'+q.id} type="number" value={String(answers[q.id]??'')} onChange={e=>change(q,e.target.value===''?'':Number(e.target.value))} placeholder="Escribe un número…"/>:q.type.includes('fecha')?<input id={'field-'+q.id} type="date" value={String(answers[q.id]??'')} onChange={e=>change(q,e.target.value)}/>:q.type.includes('si_no')||q.type.includes('boolean')?<div className="options">{['Sí','No'].map(o=><label key={o} className={'option '+(answers[q.id]===o?'selected':'')}><input type="radio" name={q.id} value={o} checked={answers[q.id]===o} onChange={()=>change(q,o)}/><span className="check">{answers[q.id]===o&&<Check size={14}/>}</span>{o}</label>)}</div>:<textarea id={'field-'+q.id} rows={q.type.includes('largo')||q.type.includes('parrafo')||q.type.includes('párrafo')?5:3} value={String(answers[q.id]??'')} onChange={e=>{change(q,e.target.value);e.target.style.height='auto';e.target.style.height=e.target.scrollHeight+'px'}} placeholder="Escribe tu respuesta aquí…"/>}{q.example&&<div className="example"><strong>Ejemplo:</strong> {q.example}</div>}</section>)}{notice&&<div className="notice" role="alert">{notice}</div>}<div className="actions"><button className="back" disabled={stage===0||busy} onClick={goBack}><ArrowLeft size={17}/> Anterior</button><button className="primary" disabled={busy} onClick={advance}>{busy?<LoaderCircle className="spin" size={17}/>:stage===pages.length-1?<CheckCircle2 size={17}/>:<ArrowRight size={17}/>} {busy?'Guardando…':stage===pages.length-1?'Finalizar cuestionario':'Guardar y continuar'}</button></div></div></>}<footer><span>© {new Date().getFullYear()} NexusRD · {FORM_VERSION}</span><span>Diseñado para Copi Autopint · Con atención a cada detalle</span></footer></div></main>
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle } from 'lucide-react';
+import { makePDF } from './pdf';
+import bank from '../public/questions.json';
+
+type Question = {
+  // Esquema con claves en español (legacy GAS) y esquema actual en minúsculas/en inglés (questions.json)
+  ID?: string; id?: string;
+  Seccion?: string; seccion?: string; section?: string;
+  Orden?: number; orden?: number; order?: number;
+  Pregunta?: string; pregunta?: string; question?: string;
+  Tipo?: string; tipo?: string; type?: string;
+  Opciones?: string | string[]; opciones?: string | string[]; options?: string | string[];
+  Obligatoria?: string | boolean; obligatoria?: string | boolean; required?: string | boolean;
+  PermitirOtro?: string | boolean; permitirOtro?: string | boolean; allowOther?: string | boolean;
+  Ayuda?: string; ayuda?: string; help?: string;
+  Ejemplo?: string; ejemplo?: string; example?: string;
+  Condicion?: string; condicion?: string; condition?: string;
+};
+
+type Q = {
+  id: string;
+  section: string;
+  order: number;
+  label: string;
+  type: string;
+  options: string[];
+  required: boolean;
+  allowOther: boolean;
+  help: string;
+  example: string;
+  condition: string;
+};
+
+const truth = (x: unknown) =>
+  x === true ||
+  String(x).toLowerCase() === 'si' ||
+  String(x).toLowerCase() === 'sí' ||
+  String(x).toLowerCase() === 'true';
+
+const normalize = (q: Question): Q => ({
+  id: String(q.id ?? q.ID ?? ''),
+  section: String(q.section ?? q.seccion ?? ''),
+  order: Number(q.order ?? q.orden ?? 0),
+  label: String(q.question ?? q.Pregunta ?? ''),
+  type: String(q.type ?? q.Tipo ?? 'texto').toLowerCase(),
+  options: Array.isArray(q.options ?? q.Opciones)
+    ? ((q.options ?? q.Opciones) as string[])
+    : String(q.options ?? q.Opciones ?? '')
+        .split(/\s*[|;,]\s*/)
+        .filter(Boolean),
+  required: truth(q.required ?? q.Obligatoria),
+  allowOther: truth(q.allowOther ?? q.PermitirOtro),
+  help: String(q.help ?? q.Ayuda ?? ''),
+  example: String(q.example ?? q.Ejemplo ?? ''),
+  condition: String(q.condition ?? q.Condicion ?? ''),
+});
+
+const MODULES = ['Inventario', 'Nomina', 'Finanzas', 'Facturacion'];
+const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const PAGE_SIZE = 4;
+const FORM_VERSION = 'R6 · 22/11/2026';
+const STORAGE_KEY = 'copi-form-data-v3';
+const LEGACY_FINISHED_KEY = 'copi-form-finished';
+const DRAFT_KEY = 'copi-form-data-v4';
+const MAX_TEXT = 8000;
+const NOT_APPLICABLE = 'No aplica';
+
+function applies(id: string, answers: Record<string, unknown>) {
+  if (id === 'INV02') return answers.INV01 !== 'No';
+  if (id === 'FIN08') return answers.FIN07 !== 'No';
+  if (id === 'FAC03') return answers.FAC01 === 'Inscrito';
+  return true;
+}
+
+function validation(q: Q, answer: unknown, detail: string) {
+  const empty = Array.isArray(answer) ? answer.length === 0 : String(answer ?? '').trim() === '';
+  if (q.required && empty) return 'Completa la pregunta obligatoria: ' + q.label;
+  if (!empty && q.id === 'NOM01' && (!Number.isSafeInteger(answer) || Number(answer) < 0)) {
+    return 'Indica una cantidad entera de personas, igual o mayor que cero.';
+  }
+  if ((answer === 'Otro' || (Array.isArray(answer) && answer.includes('Otro'))) && !detail.trim()) {
+    return 'Describe la opción «Otro»: ' + q.label;
+  }
+  return '';
+}
+const OFFICIAL_WHATSAPP_NUMBER = '18295210521';
+const LABELS: Record<string, string> = {
+  Inventario: 'Inventario y materiales',
+  Nomina: 'Nómina y personal',
+  Finanzas: 'Finanzas y gastos',
+  Facturacion: 'Facturación y comprobantes',
+};
+
+export default function Page() {
+  const [questions, setQuestions] = useState<Q[]>([]);
+  const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
+  const [stage, setStage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [finished, setFinished] = useState(false);
+  const [storageAvailable, setStorageAvailable] = useState(true);
+  const initialized = useRef(false);
+
+  useEffect(() => {
+    try {
+      const list = bank.map(normalize);
+      if (list.length !== 56 || new Set(list.map(q => q.id)).size !== 56) {
+        throw new Error('El banco de preguntas está incompleto o tiene identificadores duplicados.');
+      }
+      setQuestions(list);
+      try {
+        const currentDraft = localStorage.getItem(DRAFT_KEY);
+        const raw = currentDraft || localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const draft = JSON.parse(raw);
+          const saved: Record<string, unknown> = {};
+          const details: Record<string, string> = {};
+          for (const q of list) {
+            // Old answers cannot be reused when the question now asks something different.
+            if (!currentDraft && ['NOM09', 'FIN06', 'FIN09', 'FAC03', 'FAC04', 'FAC06', 'FAC07', 'FAC11', 'FAC12'].includes(q.id)) continue;
+            const raw = draft.answers?.[q.id];
+            const value = !currentDraft && q.id === 'NOM04' && typeof raw === 'string' ? [raw] : raw;
+            const options = [...q.options, ...(q.allowOther ? ['Otro'] : [])];
+            if (q.type === 'checkbox' && Array.isArray(value)) {
+              saved[q.id] = [...new Set(value.filter(v => options.includes(v)))];
+            } else if (q.type === 'radio' && options.includes(value)) {
+              saved[q.id] = value;
+            } else if (q.id === 'NOM01' && Number.isSafeInteger(value) && value >= 0) {
+              saved[q.id] = value;
+            } else if (q.type === 'parrafo' && typeof value === 'string') {
+              saved[q.id] = value;
+            }
+            const detail = draft.otherTexts?.[q.id];
+            if (q.allowOther && typeof detail === 'string') details[q.id] = detail;
+          }
+          setAnswers(saved);
+          setOtherTexts(details);
+          if (currentDraft) {
+            const active = Array.isArray(saved.GEN01) ? saved.GEN01.map(fold) : [];
+            const lastStage = MODULES.filter(module => active.includes(fold(module))).reduce((last, module) => last + Math.ceil(list.filter(q => fold(q.section) === fold(module)).length / PAGE_SIZE), 0);
+            setStage(Number.isSafeInteger(draft.stage) ? Math.min(lastStage, Math.max(0, draft.stage)) : 0);
+            setFinished(draft.finished === true && list.filter(q =>
+              applies(q.id, saved) && (q.id === 'GEN01' || active.includes(fold(q.section)))
+            ).every(q => !validation(q, saved[q.id], details[q.id] || '')));
+          } else {
+            setNotice('Recuperamos las respuestas compatibles. Revisa el formulario actualizado antes de finalizar.');
+          }
+        }
+      } catch {
+        setNotice('No se pudo leer el borrador guardado en este navegador.');
+      }
+      initialized.current = true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo cargar el cuestionario.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!initialized.current || !questions.length) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ answers, otherTexts, stage, finished }));
+    } catch {
+      setStorageAvailable(false);
+    }
+  }, [answers, otherTexts, stage, finished, questions.length]);
+
+  function reset(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    if (!window.confirm('¿Borrar todas las respuestas de este navegador y empezar de nuevo? Descarga primero una copia si deseas conservarlas.')) return;
+    try {
+      for (const key of [DRAFT_KEY, STORAGE_KEY, LEGACY_FINISHED_KEY, 'copi-form-draft-v1', 'copi-form-draft-v2']) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      setStorageAvailable(false);
+    }
+    setAnswers({});
+    setOtherTexts({});
+    setStage(0);
+    setFinished(false);
+    setNotice('');
+    window.scrollTo(0, 0);
+  }
+
+  const selected = Array.isArray(answers.GEN01) ? (answers.GEN01 as string[]) : [];
+
+  const pages = useMemo(() => {
+    const result: { key: string; name: string; items: Q[] }[] = [];
+    const chunk = (key: string, name: string, items: Q[]) => {
+      for (let i = 0; i < items.length; i += PAGE_SIZE) {
+        const total = Math.ceil(items.length / PAGE_SIZE);
+        result.push({
+          key: key + '-' + i,
+          name: total > 1 ? name + ' · Parte ' + (Math.floor(i / PAGE_SIZE) + 1) + ' de ' + total : name,
+          items: items.slice(i, i + PAGE_SIZE),
+        });
+      }
+    };
+    chunk('GEN', 'Servicios solicitados', questions.filter(q => fold(q.section) === 'general'));
+    for (const m of MODULES) {
+      if (!selected.some(x => fold(x) === fold(m))) continue;
+      chunk(m, LABELS[m], questions.filter(q => fold(q.section) === fold(m)));
+    }
+    return result;
+  }, [questions, selected]);
+
+  const current = pages[Math.min(stage, Math.max(0, pages.length - 1))];
+  const completed = pages.flatMap(page => page.items).filter(q => {
+    const answer = answers[q.id];
+    return applies(q.id, answers) &&
+      (Array.isArray(answer) ? answer.length > 0 : String(answer ?? '').trim() !== '');
+  }).length;
+
+  function change(q: Q, value: unknown) {
+    setAnswers(a => {
+      const next = { ...a, [q.id]: value };
+      for (const dependent of ['INV02', 'FIN08', 'FAC03']) {
+        if (!applies(dependent, next)) delete next[dependent];
+      }
+      return next;
+    });
+    setNotice('');
+  }
+
+  function changeCheckbox(q: Q, chosen: string[], option: string, checked: boolean) {
+    if (!checked) {
+      change(q, chosen.filter(value => value !== option));
+      return;
+    }
+    const exclusive = ['Ninguno por ahora', 'No sabemos'];
+    change(q, q.id === 'FAC12'
+      ? exclusive.includes(option) ? [option] : [...chosen.filter(value => !exclusive.includes(value)), option]
+      : [...chosen, option]);
+  }
+
+  function changeOther(id: string, value: string) {
+    setOtherTexts(a => ({ ...a, [id]: value }));
+    setNotice('');
+  }
+
+  const hasOther = (q: Q) =>
+    q.allowOther &&
+    (answers[q.id] === 'Otro' || (Array.isArray(answers[q.id]) && (answers[q.id] as string[]).includes('Otro')));
+
+  function goBack() {
+    if (stage === 0) return;
+    setStage(x => Math.max(0, x - 1));
+    setNotice('Los cambios se guardan automáticamente en el navegador.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function advance() {
+    if (!current) return;
+    for (const q of current.items) {
+      if (!applies(q.id, answers)) continue;
+      const issue = validation(q, answers[q.id], otherTexts[q.id] || '');
+      if (issue) {
+        setNotice(issue);
+        document.getElementById(q.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
+    if (stage >= pages.length - 1) {
+      const invalid = pages.findIndex(page => page.items.some(q =>
+        applies(q.id, answers) && validation(q, answers[q.id], otherTexts[q.id] || '')
+      ));
+      if (invalid >= 0) {
+        setStage(invalid);
+        setNotice('Revisa las respuestas pendientes de este paso.');
+        return;
+      }
+      if (!window.confirm('¿Confirmas que terminaste? Revisa tus respuestas antes de finalizar.')) return;
+      setFinished(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setStage(x => x + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function generatePDF() {
+    return makePDF(FORM_VERSION, selected, pages.map(page => ({
+      name: page.name,
+      items: page.items.map(q => {
+        const value = answers[q.id];
+        const values = Array.isArray(value) ? value : [value];
+        const detail = otherTexts[q.id]?.trim();
+        const text = values.filter(v => v !== undefined && String(v).trim()).map(v =>
+          v === 'Otro' && detail ? 'Otro: ' + detail : String(v)
+        ).join(', ');
+        return { id: q.id, label: q.label, answer: applies(q.id, answers) ? text || '(sin respuesta)' : NOT_APPLICABLE };
+      }),
+    })));
+  }
+
+  function exportPDF() {
+    generatePDF().save(pdfName());
+  }
+
+  function pdfName() {
+    return `Cuestionario_Copi_Autopint_${new Date().toISOString().slice(0, 10)}.pdf`;
+  }
+
+  async function shareViaWhatsApp() {
+    const pdfBlob = generatePDF().output('blob');
+    const file = new File([pdfBlob], pdfName(), { type: 'application/pdf' });
+
+    const message = 'Hola, NexusRD. Adjunto el cuestionario de requisitos completado de Copi Autopint.';
+
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Cuestionario Copi Autopint', text: message });
+        return;
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+      }
+    }
+
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+    const waUrl = `https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  if (loading) {
+    return (
+      <main className="shell">
+        <header className="topbar">
+          <div className="brand">
+            
+            <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
+          </div>
+          <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
+        </header>
+        <div className="container">
+          <div className="eyebrow"><span className="dot" /> PROYECTO · COPI AUTOPINT</div>
+          <h1>Construyamos la solución <em>correcta.</em></h1>
+          <p className="intro">Queremos entender cómo trabaja tu negocio para diseñar un sistema que realmente te facilite el día a día.</p>
+          <div className="panel centered"><LoaderCircle className="spin" /> Cargando cuestionario…</div>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="shell">
+        <header className="topbar">
+          <div className="brand">
+            
+            <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
+          </div>
+          <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
+        </header>
+        <div className="container">
+          <div className="eyebrow"><span className="dot" /> PROYECTO · COPI AUTOPINT</div>
+          <h1>Construyamos la solución <em>correcta.</em></h1>
+          <div className="panel centered error">
+            <AlertCircle size={32} />
+            <h2>El formulario no está disponible</h2>
+            <p>{error}</p>
+            <p>Comunícate con NexusRD para resolverlo.</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (finished) {
+    return (
+      <main className="shell">
+        <header className="topbar">
+          <div className="brand">
+            
+            <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
+          </div>
+          <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
+        </header>
+        <div className="container">
+          <div className="eyebrow"><span className="dot" /> PROYECTO · COPI AUTOPINT</div>
+          <h1>Construyamos la solución <em>correcta.</em></h1>
+          <div className="panel centered success">
+            <div className="success-icon"><CheckCircle2 size={38} /></div>
+            <h2>¡Cuestionario completado!</h2>
+            <p>{storageAvailable ? 'Las respuestas se guardaron en tu navegador.' : 'El navegador no permitió guardar las respuestas. Descarga una copia antes de cerrar.'}</p>
+            <div className="actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '24px' }}>
+              <button className="primary" onClick={exportPDF}><FileText size={18} /> Descargar PDF</button>
+              <button className="primary" onClick={shareViaWhatsApp}><Share2 size={18} /> Enviar PDF al equipo de NexusRD</button>
+            </div>
+            <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
+              Los datos permanecen en este navegador. <a href="#" onClick={reset}>Borrar respuestas y empezar de nuevo</a>.
+            </p>
+            <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
+              Si se abre el menú para compartir, elige WhatsApp y comprueba que el destinatario sea NexusRD (+1 829-521-0521). Si se descarga el PDF, adjúntalo al <a href={`https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer">chat oficial de NexusRD</a> y confirma el envío en WhatsApp.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="shell">
+      <header className="topbar">
+        <div className="brand">
+          
+          <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
+        </div>
+        <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
+      </header>
+      <div className="container">
+        <div className="eyebrow"><span className="dot" /> PROYECTO · COPI AUTOPINT</div>
+        <h1>Construyamos la solución <em>correcta.</em></h1>
+        <p className="intro">Queremos entender cómo trabaja tu negocio para diseñar un sistema que realmente te facilite el día a día. Responde con tranquilidad: cada pregunta incluye orientación.</p>
+
+        {!storageAvailable && <p role="alert">El navegador no permite guardar el progreso. Descarga el PDF al terminar.</p>}
+        <p><a href="#" onClick={reset}>Borrar borrador y empezar de nuevo</a></p>
+        <div className="progress-info">
+          <span>Paso {Math.min(stage + 1, pages.length)} de {pages.length}</span>
+          <span>{completed} respuestas en el formulario</span>
+        </div>
+        <div className="progress"><div style={{ width: ((stage + 1) / pages.length) * 100 + '%' }} /></div>
+
+        <div className="panel">
+          <div className="section-heading">
+            <div className="section-icon"><ClipboardList size={22} /></div>
+            <div><small>ETAPA {String(stage + 1).padStart(2, '0')}</small><h2>{current?.name}</h2></div>
+          </div>
+          {stage === 0 && <p className="section-lead">Selecciona las áreas que necesitas. Solo te mostraremos las preguntas correspondientes.</p>}
+          {current?.items.map((q, i) => (
+            <section className="question" key={q.id} id={q.id}>
+              <label className="question-title" htmlFor={'field-' + q.id}>
+                <span className="num">{String(i + 1).padStart(2, '0')}</span>
+                {q.label}
+                {q.required && <span className="required">*</span>}
+              </label>
+              {q.help && <p className="help">{q.help}</p>}
+              {!applies(q.id, answers) ? <p>{NOT_APPLICABLE}</p> : q.id === 'GEN01' || q.type.includes('multiple') || q.type.includes('checkbox') || q.type.includes('multi') ? (
+                <div className="options">
+                  {(q.id === 'GEN01' && q.options.length === 0
+                    ? ['Inventario', 'Nómina', 'Finanzas', 'Facturación']
+                    : q.options
+                  )
+                    .concat(q.allowOther && !q.options.includes('Otro') ? ['Otro'] : [])
+                    .map(o => {
+                      const chosen = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
+                      return (
+                        <label key={o} className={'option ' + (chosen.includes(o) ? 'selected' : '')}>
+                          <input
+                            type="checkbox"
+                            value={o}
+                            checked={chosen.includes(o)}
+                            onChange={e => changeCheckbox(q, chosen, o, e.target.checked)}
+                          />
+                          <span className="check">{chosen.includes(o) && <Check size={14} />}</span>
+                          {LABELS[fold(o) === 'nomina' ? 'Nomina' : fold(o) === 'facturacion' ? 'Facturacion' : o] ?? o}
+                        </label>
+                      );
+                    })}
+                  {hasOther(q) && (
+                    <textarea
+                      rows={3}
+                      maxLength={MAX_TEXT}
+                      value={otherTexts[q.id] || ''}
+                      onChange={e => changeOther(q.id, e.target.value)}
+                      placeholder="Especifica cuál…"
+                      aria-label={'Especifica Otro: ' + q.label}
+                    />
+                  )}
+                </div>
+              ) : q.type === 'radio' || q.type.includes('select') || q.type.includes('opcion') || q.type.includes('lista') ? (
+                <div className="options">
+                  {q.options.concat(q.allowOther && !q.options.includes('Otro') ? ['Otro'] : []).map(o => (
+                    <label key={o} className={'option ' + (answers[q.id] === o ? 'selected' : '')}>
+                      <input
+                        type="radio"
+                        name={q.id}
+                        value={o}
+                        checked={answers[q.id] === o}
+                        onChange={() => change(q, o)}
+                      />
+                      <span className="check">{answers[q.id] === o && <Check size={14} />}</span>
+                      {o}
+                    </label>
+                  ))}
+                  {hasOther(q) && (
+                    <textarea
+                      rows={3}
+                      maxLength={MAX_TEXT}
+                      value={otherTexts[q.id] || ''}
+                      onChange={e => changeOther(q.id, e.target.value)}
+                      placeholder="Especifica cuál…"
+                      aria-label={'Especifica Otro: ' + q.label}
+                    />
+                  )}
+                </div>
+              ) : q.type.includes('numero') || q.type.includes('número') ? (
+                <input
+                  id={'field-' + q.id}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={String(answers[q.id] ?? '')}
+                  onChange={e => change(q, e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="Escribe un número…"
+                />
+              ) : q.type.includes('fecha') ? (
+                <input
+                  id={'field-' + q.id}
+                  type="date"
+                  value={String(answers[q.id] ?? '')}
+                  onChange={e => change(q, e.target.value)}
+                />
+              ) : q.type.includes('si_no') || q.type.includes('boolean') ? (
+                <div className="options">
+                  {['Sí', 'No'].map(o => (
+                    <label key={o} className={'option ' + (answers[q.id] === o ? 'selected' : '')}>
+                      <input
+                        type="radio"
+                        name={q.id}
+                        value={o}
+                        checked={answers[q.id] === o}
+                        onChange={() => change(q, o)}
+                      />
+                      <span className="check">{answers[q.id] === o && <Check size={14} />}</span>
+                      {o}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <textarea
+                  id={'field-' + q.id}
+                  maxLength={MAX_TEXT}
+                  rows={q.type.includes('largo') || q.type.includes('parrafo') || q.type.includes('párrafo') ? 5 : 3}
+                  value={String(answers[q.id] ?? '')}
+                  onChange={e => {
+                    change(q, e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }}
+                  placeholder="Escribe tu respuesta aquí…"
+                />
+              )}
+              {q.example && <div className="example"><strong>Ejemplo:</strong> {q.example}</div>}
+            </section>
+          ))}
+          {notice && <div className="notice" role="alert">{notice}</div>}
+        </div>
+
+        <div className="actions">
+          <button className="back" disabled={stage === 0} onClick={goBack}>
+            <ArrowLeft size={17} /> Anterior
+          </button>
+          <button className="primary" onClick={advance}>
+            {stage === pages.length - 1 ? <CheckCircle2 size={17} /> : <ArrowRight size={17} />}
+            {stage === pages.length - 1 ? 'Finalizar cuestionario' : 'Guardar y continuar'}
+          </button>
+        </div>
+      </div>
+      <footer>
+        <span>© {new Date().getFullYear()} NexusRD · {FORM_VERSION}</span>
+        <span>Diseñado para Copi Autopint · Con atención a cada detalle</span>
+      </footer>
+    </main>
+  );
 }

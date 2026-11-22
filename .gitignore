@@ -1,5 +1,10 @@
 node_modules
 .next
+out
+build
+dist
+test-results
+playwright-report
 .env*
 !.env.example
 *.tsbuildinfo

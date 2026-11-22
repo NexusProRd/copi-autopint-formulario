@@ -1,36 +1,48 @@
-name: Publicar cuestionario en GitHub Pages
+name: Verificar cuestionario y publicar en GitHub Pages
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
-concurrency:
-  group: pages
-  cancel-in-progress: true
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run build
-        env:
-          NEXT_PUBLIC_GAS_QUESTIONS_URL: https://script.google.com/macros/s/AKfycbzZFwXzl-Kn31qLCaipRAYmjQ8a2QWLlTfItUO3jopIYsPPy0fSXtjNvJ1fTminnpsx/exec
-          NEXT_PUBLIC_FORM_API_URL: ${{ vars.FORM_API_URL }}
-          NEXT_PUBLIC_NEXUS_WHATSAPP: ${{ vars.NEXUS_WHATSAPP }}
-      - uses: actions/configure-pages@v5
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
       - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           path: out
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: verify
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/configure-pages@v5
       - id: deployment
         uses: actions/deploy-pages@v4
+
