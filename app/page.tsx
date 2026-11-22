@@ -104,6 +104,7 @@ export default function Page() {
   const [finished, setFinished] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showFinishModal, setShowFinishModal] = useState(false);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -275,9 +276,7 @@ export default function Page() {
         setNotice('Revisa las respuestas pendientes de este paso.');
         return;
       }
-      if (!window.confirm('¿Confirmas que terminaste? Revisa tus respuestas antes de finalizar.')) return;
-      setFinished(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setShowFinishModal(true);
       return;
     }
     setStage(x => x + 1);
@@ -585,6 +584,20 @@ export default function Page() {
             <div className="modal-actions">
               <button type="button" className="modal-cancel" autoFocus onClick={() => setShowResetModal(false)}>Conservar respuestas</button>
               <button type="button" className="modal-danger" onClick={reset}><Trash2 size={16} /> Sí, borrar borrador</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {showFinishModal && (
+        <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowFinishModal(false); }}>
+          <section className="reset-modal" role="alertdialog" aria-modal="true" aria-labelledby="finish-modal-title" aria-describedby="finish-modal-description">
+            <button type="button" className="modal-close" aria-label="Cerrar" onClick={() => setShowFinishModal(false)}><X size={20} /></button>
+            <div className="modal-icon modal-icon-success"><CheckCircle2 size={25} /></div>
+            <h2 id="finish-modal-title">¿Todo listo para finalizar?</h2>
+            <p id="finish-modal-description">Revisa que tus respuestas estén completas. Al confirmar, podrás descargar el cuestionario en PDF o compartirlo por WhatsApp.</p>
+            <div className="modal-actions">
+              <button type="button" className="modal-cancel" autoFocus onClick={() => setShowFinishModal(false)}>Seguir revisando</button>
+              <button type="button" className="modal-confirm" onClick={() => { setShowFinishModal(false); setFinished(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><CheckCircle2 size={16} /> Finalizar cuestionario</button>
             </div>
           </section>
         </div>
