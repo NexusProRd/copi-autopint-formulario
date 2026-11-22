@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle, Trash2 } from 'lucide-react';
 import { makePDF } from './pdf';
 import bank from '../public/questions.json';
 
@@ -432,7 +432,7 @@ export default function Page() {
         <p className="intro">Queremos entender cómo trabaja tu negocio para diseñar un sistema que realmente te facilite el día a día. Responde con tranquilidad: cada pregunta incluye orientación.</p>
 
         {!storageAvailable && <p role="alert">El navegador no permite guardar el progreso. Descarga el PDF al terminar.</p>}
-        <p><a href="#" onClick={reset}>Borrar borrador y empezar de nuevo</a></p>
+        <div className="draft-actions"><a className="reset-draft" href="#" onClick={reset}><Trash2 size={14} aria-hidden="true" /> Borrar borrador y empezar de nuevo</a></div>
         <div className="progress-info">
           <span>Paso {Math.min(stage + 1, pages.length)} de {pages.length}</span>
           <span>{completed} respuestas en el formulario</span>
