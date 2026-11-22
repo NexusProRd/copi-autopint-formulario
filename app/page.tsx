@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle, Trash2, X } from 'lucide-react';
 import { makePDF } from './pdf';
 import bank from '../public/questions.json';
 
@@ -103,6 +103,7 @@ export default function Page() {
   const [notice, setNotice] = useState('');
   const [finished, setFinished] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
+  const [showResetModal, setShowResetModal] = useState(false);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -341,7 +342,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="" width={46} height={46} onError={event => { event.currentTarget.style.display = "none"; }} />
             
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
@@ -362,7 +363,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="" width={46} height={46} onError={event => { event.currentTarget.style.display = "none"; }} />
             
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
@@ -387,7 +388,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="" width={46} height={46} onError={event => { event.currentTarget.style.display = "none"; }} />
             
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
@@ -405,7 +406,7 @@ export default function Page() {
               <button className="primary" onClick={shareViaWhatsApp}><Share2 size={18} /> Enviar PDF al equipo de NexusRD</button>
             </div>
             <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
-              Los datos permanecen en este navegador. <a href="#" onClick={reset}>Borrar respuestas y empezar de nuevo</a>.
+              Los datos permanecen en este navegador. <a href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}>Borrar respuestas y empezar de nuevo</a>.
             </p>
             <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
               Si se abre el menú para compartir, elige WhatsApp y comprueba que el destinatario sea NexusRD (+1 829-521-0521). Si se descarga el PDF, adjúntalo al <a href={`https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer">chat oficial de NexusRD</a> y confirma el envío en WhatsApp.
@@ -420,7 +421,7 @@ export default function Page() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="" width={46} height={46} onError={event => { event.currentTarget.style.display = "none"; }} />
           
           <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
         </div>
@@ -575,6 +576,20 @@ export default function Page() {
           </button>
         </div>
       </div>
+      {showResetModal && (
+        <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowResetModal(false); }}>
+          <section className="reset-modal" role="alertdialog" aria-modal="true" aria-labelledby="reset-modal-title" aria-describedby="reset-modal-description">
+            <button type="button" className="modal-close" aria-label="Cerrar" onClick={() => setShowResetModal(false)}><X size={20} /></button>
+            <div className="modal-icon"><Trash2 size={24} /></div>
+            <h2 id="reset-modal-title">¿Empezar de nuevo?</h2>
+            <p id="reset-modal-description">Se borrarán las respuestas guardadas en este dispositivo. Esta acción no se puede deshacer. Si quieres conservarlas, descarga primero tu PDF.</p>
+            <div className="modal-actions">
+              <button type="button" className="modal-cancel" autoFocus onClick={() => setShowResetModal(false)}>Conservar respuestas</button>
+              <button type="button" className="modal-danger" onClick={reset}><Trash2 size={16} /> Sí, borrar borrador</button>
+            </div>
+          </section>
+        </div>
+      )}
       <footer>
         <span>© {new Date().getFullYear()} NexusRD · {FORM_VERSION}</span>
         <span>Diseñado para Copi Autopint · Con atención a cada detalle</span>
