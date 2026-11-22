@@ -1,76 +1,194 @@
-import { test, expect } from '@playwright/test';
-import fs from 'fs';
+import { test, expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import bank from '../../public/questions.json';
 
-const BASE = '/copi-autopint-formulario';
+const next = (page: Page) => page.getByRole('button', { name: /Guardar y continuar|Finalizar cuestionario/ });
+const clean = (text: string) => text.replace(/\s+/g, ' ').trim();
+const longAnswer = 'Detalle de reparación con pintura y lijas. '.repeat(155) + 'FIN DE LA RESPUESTA';
 
-test.describe('Copi Autopint — Formulario funcional (Playwright)', () => {
-  test('TC-01: carga la pantalla inicial del cuestionario', async ({ page }) => {
-    await page.goto(BASE + '/');
-    await expect(page.getByRole('heading', { name: /Construyamos la solución/i })).toBeVisible();
-    await expect(page.locator('#GEN01')).toBeVisible();
-  });
+async function extract(bytes: Buffer) {
+  const task = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
+  const document = await task.promise;
+  const pages = [];
+  for (let i = 1; i <= document.numPages; ++i) {
+    const page = await document.getPage(i);
+    const { items } = await page.getTextContent();
+    pages.push(clean(items.flatMap(item => 'str' in item ? [item.str] : []).join(' ')));
+  }
+  await task.destroy();
+  return pages;
+}
 
-  test('TC-02: navega a la siguiente etapa respondiendo GEN01', async ({ page }) => {
-    await page.goto(BASE + '/');
-    await expect(page.locator('#GEN01')).toBeVisible();
-    await page.locator('#GEN01 input[type="checkbox"]').first().check();
-    await page.getByRole('button', { name: /Guardar y continuar/i }).click();
-    await expect(page.locator('#INV01')).toBeVisible();
-  });
+async function download(page: Page, name: string) {
+  const event = page.waitForEvent('download');
+  await page.getByRole('button', { name, exact: true }).click();
+  const file = await event;
+  return extract(await readFile((await file.path())!));
+}
 
-  test('TC-03: persiste la respuesta del navegador al recargar', async ({ page }) => {
-    await page.goto(BASE + '/');
-    await page.locator('#GEN01 input[type="checkbox"]').first().check();
+async function start(page: Page, modules: string[]) {
+  await page.goto('./');
+  await expect(page.locator('#GEN01')).toBeVisible();
+  for (const module of modules) await page.locator(`#GEN01 input[value="${module}"]`).check();
+  await next(page).click();
+}
+
+for (const modules of [bank[0].options, ...bank[0].options.map(module => [module])]) {
+  test(`recorrido real y PDF: ${modules.join(', ')}`, async ({ page }) => {
+    const all = modules.length === 4;
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'canShare', { value: () => false });
+      window.open = url => { document.body.dataset.whatsapp = String(url); return null; };
+    });
+    await start(page, modules);
+    const expected = new Map<string, string>([['GEN01', modules.join(', ')]]);
+    const totalSteps = all ? 17 : 5;
+    for (let step = 2; step <= totalSteps; step++) {
+      await expect(page.getByText(`Paso ${step} de ${totalSteps}`, { exact: true })).toBeVisible();
+      const ids = await page.locator('section.question').evaluateAll(els => els.map(el => el.id));
+      if (all) {
+        const first = bank.find(q => q.id === ids[0]);
+        if (first?.required) {
+          await next(page).click();
+          await expect(page.getByText(/Completa la pregunta obligatoria/)).toBeVisible();
+        }
+      }
+      for (const id of ids) {
+        const field = page.locator('#' + id);
+        const choice = field.locator('input[type=checkbox], input[type=radio]');
+        if (await choice.count()) {
+          const other = all && ['INV02', 'INV03', 'FAC02'].includes(id);
+          const option = other ? field.locator('input[value="Otro"]') : choice.first();
+          if (other) await expect(option).toHaveCount(1);
+          await option.check();
+          const value = (await option.getAttribute('value'))!;
+          expected.set(id, value);
+          if (other && id !== 'INV02') {
+            await field.locator('textarea').fill('Detalle ' + id);
+            expected.set(id, 'Otro: Detalle ' + id);
+          }
+        } else if (await field.locator('input[type=number]').count()) {
+          const input = field.locator('input');
+          if (all) {
+            await input.fill('-7.5');
+            await next(page).click();
+            await expect(page.getByText(/Indica una cantidad entera/)).toBeVisible();
+          }
+          await input.fill('0');
+          expected.set(id, '0');
+        } else {
+          const answer = all && id === 'INV14' ? longAnswer : 'Respuesta sintética ' + id;
+          await field.locator('textarea').fill(answer);
+          expected.set(id, answer);
+        }
+      }
+      if (all && step === 2) {
+        await next(page).click();
+        await expect(page.getByText(/Describe la opción «Otro»/)).toBeVisible();
+        await page.locator('#INV02 textarea').fill('Hoja auxiliar');
+        expected.set('INV02', 'Otro: Hoja auxiliar');
+        await page.reload();
+        await expect(page.getByText('Paso 2 de 17', { exact: true })).toBeVisible();
+        await expect(page.locator('#INV02 textarea')).toHaveValue('Hoja auxiliar');
+      }
+      if (all && step === 3) {
+        await page.getByRole('button', { name: 'Anterior' }).click();
+        await page.locator('#INV01 input[value="No"]').check();
+        await expect(page.locator('#INV02')).toContainText('No aplica');
+        expected.set('INV01', 'No');
+        expected.set('INV02', 'No aplica');
+        await next(page).click();
+      }
+      if (step === totalSteps) page.once('dialog', dialog => dialog.accept());
+      await next(page).click();
+    }
+    await expect(page.getByRole('heading', { name: /Cuestionario completado/ })).toBeVisible();
+    await expect(page.getByRole('button')).toHaveCount(2);
+    const original = await download(page, 'Descargar PDF');
+    const ids = original.join(' ').match(/\b(?:GEN|INV|NOM|FIN|FAC)\d\d · ¿/g)!.map(x => x.slice(0, 5));
+    expect([...new Set(ids)]).toEqual([...expected.keys()]);
+    expect(expected.size).toBe(all ? 56 : modules[0] === 'Nómina' ? 14 : 15);
+    for (const [id, answer] of expected) {
+      const segment = original.flatMap(text => text.split(/(?=\b(?:GEN|INV|NOM|FIN|FAC)\d\d · ¿)/))
+        .filter(text => text.startsWith(id + ' · '));
+      expect(segment.length, id).toBeGreaterThan(0);
+      expect(segment[0]).toContain('Respuesta: ' + clean(answer.length > 300 ? answer.slice(0, 90) : answer));
+      if (answer.length > 300) {
+        expect(segment.at(-1)).toContain('FIN DE LA RESPUESTA');
+        expect(segment.slice(1).every(part => part.includes('Respuesta (continuación):'))).toBe(true);
+      }
+    }
     await page.reload();
-    await expect(page.locator('#GEN01 input[type="checkbox"]').first()).toBeChecked();
+    expect(await download(page, 'Descargar PDF')).toEqual(original);
+    expect(await download(page, 'Enviar PDF al equipo de NexusRD')).toEqual(original);
+    await expect(page.locator('body')).toHaveAttribute('data-whatsapp', /^https:\/\/wa.me\/18295210521\?text=/);
+    if (all) {
+      const reset = page.getByRole('link', { name: /Borrar respuestas/ });
+      page.once('dialog', dialog => dialog.dismiss());
+      await reset.click();
+      await expect(page.getByRole('heading', { name: /Cuestionario completado/ })).toBeVisible();
+      page.once('dialog', dialog => dialog.accept());
+      await reset.click();
+      await page.reload();
+      await expect(page.locator('#GEN01 input:checked')).toHaveCount(0);
+    }
   });
+}
 
-  test('TC-04: restaura el estado finalizado conservando las respuestas', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('copi-form-data-v3', JSON.stringify({ answers: { GEN01: ['Inventario'] }, otherTexts: {} }));
-      localStorage.setItem('copi-form-finished', 'true');
-    });
-    await page.goto(BASE + '/');
-    await expect(page.getByRole('heading', { name: /Cuestionario completado/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Descargar PDF/i })).toBeVisible();
+test('Web Share recibe el PDF y permite cancelar sin abrir WhatsApp', async ({ page }) => {
+  await page.addInitScript(() => {
+    const key = 'copi-form-data-v4';
+    const answers = { GEN01: ['Inventario'], INV01: 'No', INV03: ['Pinturas'], INV04: 'Menos de 20',
+      INV05: ['Compra'], INV06: 'Sí', INV07: ['Galón'], INV08: 'Sí', INV10: 'Sí', INV11: ['Administrador'],
+      INV12: 'Sí', INV13: ['Existencias actuales'], INV14: 'Control de materiales' };
+    localStorage.setItem(key, JSON.stringify({ stage: 4, answers, finished: true }));
+    Object.defineProperty(navigator, 'canShare', { value: () => true });
+    Object.defineProperty(navigator, 'share', { value: ({ files }: { files: File[] }) => {
+      document.body.dataset.shared = files[0].type + ':' + files[0].size;
+      throw new DOMException('Cancelado', 'AbortError');
+    } });
+    window.open = () => { document.body.dataset.whatsapp = 'abierto'; return null; };
   });
-
-  test('TC-05: descarga un PDF desde la pantalla final', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('copi-form-finished', 'true');
-    });
-    await page.goto(BASE + '/');
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 30000 }),
-      page.getByRole('button', { name: /Descargar PDF/i }).click(),
-    ]);
-    const target = '/tmp/opencode/copi-autopint-test.pdf';
-    await download.saveAs(target);
-    const size = fs.statSync(target).size;
-    expect(size).toBeGreaterThan(0);
-  });
-
-  test('TC-06: muestra los dos botones finales y envía el PDF al equipo de NexusRD', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('copi-form-data-v3', JSON.stringify({ answers: { GEN01: ['Inventario'] }, otherTexts: {} }));
-      localStorage.setItem('copi-form-finished', 'true');
-    });
-    await page.goto(BASE + '/');
-    await expect(page.getByRole('heading', { name: /Cuestionario completado/i })).toBeVisible();
-
-    const downloadPdf = page.getByRole('button', { name: /Descargar PDF/i });
-    const enviarPdf = page.getByRole('button', { name: /Enviar PDF al equipo de NexusRD/i });
-    await expect(downloadPdf).toBeVisible();
-    await expect(enviarPdf).toBeVisible();
-    await expect(page.getByRole('button', { name: /Descargar Excel/i })).toHaveCount(0);
-
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 30000 }),
-      enviarPdf.click(),
-    ]);
-    const target = '/tmp/opencode/copi-autopint-test-enviar.pdf';
-    await download.saveAs(target);
-    const size = fs.statSync(target).size;
-    expect(size).toBeGreaterThan(0);
-  });
+  await page.goto('./');
+  await page.getByRole('button', { name: 'Enviar PDF al equipo de NexusRD' }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-shared', /^application\/pdf:[1-9]\d+/);
+  await expect(page.locator('body')).not.toHaveAttribute('data-whatsapp', 'abierto');
+  await expect(page.getByRole('link', { name: /chat oficial/ })).toHaveAttribute('href', 'https://wa.me/18295210521');
 });
+
+
+
+test('dependencias de costos y autorización y selección excluyente', async ({ page }) => {
+  await start(page, ['Finanzas', 'Facturación']);
+  const chooseFirst = async () => {
+    for (const field of await page.locator('section.question').all()) {
+      const option = field.locator('input[type=checkbox],input[type=radio]').first();
+      const text = field.locator('textarea');
+      if (await option.count()) await option.check();
+      else if (await text.count()) await text.fill('Caso sintético');
+    }
+  };
+  await chooseFirst();
+  await next(page).click();
+  await chooseFirst();
+  await page.locator('#FIN07 input[value="No"]').check();
+  await expect(page.locator('#FIN08')).toContainText('No aplica');
+  await next(page).click();
+  await chooseFirst();
+  await next(page).click();
+  await chooseFirst();
+  await next(page).click();
+  await chooseFirst();
+  await page.locator('#FAC01 input[value="No inscrito"]').check();
+  await expect(page.locator('#FAC03')).toContainText('No aplica');
+  await next(page).click();
+  await chooseFirst();
+  await next(page).click();
+  await page.locator('#FAC12 input[value="Anulaciones"]').check();
+  await page.locator('#FAC12 input[value="Ninguno por ahora"]').check();
+  await expect(page.locator('#FAC12 input[value="Anulaciones"]')).not.toBeChecked();
+  await page.locator('#FAC12 input[value="Devoluciones"]').check();
+  await expect(page.locator('#FAC12 input[value="Ninguno por ahora"]')).not.toBeChecked();
+});
+

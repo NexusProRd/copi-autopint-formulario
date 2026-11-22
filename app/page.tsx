@@ -1,9 +1,8 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, Download, FileSpreadsheet, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle } from 'lucide-react';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
-import * as XLSX from 'xlsx';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ClipboardList, FileText, LoaderCircle, Send, ShieldCheck, Share2, AlertCircle } from 'lucide-react';
+import { makePDF } from './pdf';
+import bank from '../public/questions.json';
 
 type Question = {
   // Esquema con claves en español (legacy GAS) y esquema actual en minúsculas/en inglés (questions.json)
@@ -61,9 +60,31 @@ const normalize = (q: Question): Q => ({
 const MODULES = ['Inventario', 'Nomina', 'Finanzas', 'Facturacion'];
 const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const PAGE_SIZE = 4;
-const FORM_VERSION = 'R5 · 22/11/2026';
+const FORM_VERSION = 'R6 · 22/11/2026';
 const STORAGE_KEY = 'copi-form-data-v3';
-const FINISHED_KEY = 'copi-form-finished';
+const LEGACY_FINISHED_KEY = 'copi-form-finished';
+const DRAFT_KEY = 'copi-form-data-v4';
+const MAX_TEXT = 8000;
+const NOT_APPLICABLE = 'No aplica';
+
+function applies(id: string, answers: Record<string, unknown>) {
+  if (id === 'INV02') return answers.INV01 !== 'No';
+  if (id === 'FIN08') return answers.FIN07 !== 'No';
+  if (id === 'FAC03') return answers.FAC01 === 'Inscrito';
+  return true;
+}
+
+function validation(q: Q, answer: unknown, detail: string) {
+  const empty = Array.isArray(answer) ? answer.length === 0 : String(answer ?? '').trim() === '';
+  if (q.required && empty) return 'Completa la pregunta obligatoria: ' + q.label;
+  if (!empty && q.id === 'NOM01' && (!Number.isSafeInteger(answer) || Number(answer) < 0)) {
+    return 'Indica una cantidad entera de personas, igual o mayor que cero.';
+  }
+  if ((answer === 'Otro' || (Array.isArray(answer) && answer.includes('Otro'))) && !detail.trim()) {
+    return 'Describe la opción «Otro»: ' + q.label;
+  }
+  return '';
+}
 const OFFICIAL_WHATSAPP_NUMBER = '18295210521';
 const LABELS: Record<string, string> = {
   Inventario: 'Inventario y materiales',
@@ -77,88 +98,95 @@ export default function Page() {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
   const [stage, setStage] = useState(0);
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [finished, setFinished] = useState(false);
+  const [storageAvailable, setStorageAvailable] = useState(true);
   const initialized = useRef(false);
 
   useEffect(() => {
-    let alive = true;
-    async function init() {
-      try {
-        const res = await fetch('/copi-autopint-formulario/questions.json', { cache: 'no-store' });
-        if (!res.ok) throw new Error('No se pudo cargar questions.json');
-        const data: Question[] = await res.json();
-        const list = data.map(normalize).filter((q: Q) => q.id && q.label).sort((a, b) => a.order - b.order);
-        if (!list.length) throw new Error('No hay preguntas válidas en questions.json');
-        const ids = new Set(list.map(q => q.id));
-        if (ids.size !== list.length) throw new Error('Hay preguntas duplicadas en questions.json');
-        const counts = { General: 1, Inventario: 14, Nomina: 13, Finanzas: 14, Facturacion: 14 };
-        const incomplete = Object.entries(counts).filter(
-          ([name, count]) => list.filter(q => fold(q.section) === fold(name)).length !== count
-        );
-        if (incomplete.length) {
-          throw new Error(
-            'El banco de preguntas está incompleto: ' +
-              incomplete.map(([name, count]) => `${name} (esperadas ${count})`).join(', ')
-          );
-        }
-
-        let local: Record<string, unknown> = {};
-        let localOther: Record<string, string> = {};
-        let finishedFlag = false;
-        try {
-          const stored = localStorage.getItem(STORAGE_KEY);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            local = parsed.answers || {};
-            localOther = parsed.otherTexts || {};
-          }
-          if (typeof window !== 'undefined' && localStorage.getItem(FINISHED_KEY)) {
-            finishedFlag = true;
-          }
-        } catch {}
-
-        if (!alive) return;
-        setQuestions(list);
-        setAnswers(local);
-        setOtherTexts(localOther);
-        setFinished(finishedFlag);
-        if (finishedFlag) {
-          // Consistencia: conservar las respuestas (STORAGE_KEY) y el estado finalizado (FINISHED_KEY).
-          try {
-            localStorage.setItem(FINISHED_KEY, 'true');
-          } catch {}
-        } else {
-          localStorage.removeItem('copi-form-draft-v1');
-          localStorage.removeItem('copi-form-draft-v2');
-        }
-        initialized.current = true;
-      } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : 'No se pudo cargar el cuestionario.');
-      } finally {
-        if (alive) setLoading(false);
+    try {
+      const list = bank.map(normalize);
+      if (list.length !== 56 || new Set(list.map(q => q.id)).size !== 56) {
+        throw new Error('El banco de preguntas está incompleto o tiene identificadores duplicados.');
       }
+      setQuestions(list);
+      try {
+        const currentDraft = localStorage.getItem(DRAFT_KEY);
+        const raw = currentDraft || localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const draft = JSON.parse(raw);
+          const saved: Record<string, unknown> = {};
+          const details: Record<string, string> = {};
+          for (const q of list) {
+            // Old answers cannot be reused when the question now asks something different.
+            if (!currentDraft && ['NOM09', 'FIN06', 'FIN09', 'FAC03', 'FAC04', 'FAC06', 'FAC07', 'FAC11', 'FAC12'].includes(q.id)) continue;
+            const raw = draft.answers?.[q.id];
+            const value = !currentDraft && q.id === 'NOM04' && typeof raw === 'string' ? [raw] : raw;
+            const options = [...q.options, ...(q.allowOther ? ['Otro'] : [])];
+            if (q.type === 'checkbox' && Array.isArray(value)) {
+              saved[q.id] = [...new Set(value.filter(v => options.includes(v)))];
+            } else if (q.type === 'radio' && options.includes(value)) {
+              saved[q.id] = value;
+            } else if (q.id === 'NOM01' && Number.isSafeInteger(value) && value >= 0) {
+              saved[q.id] = value;
+            } else if (q.type === 'parrafo' && typeof value === 'string') {
+              saved[q.id] = value;
+            }
+            const detail = draft.otherTexts?.[q.id];
+            if (q.allowOther && typeof detail === 'string') details[q.id] = detail;
+          }
+          setAnswers(saved);
+          setOtherTexts(details);
+          if (currentDraft) {
+            const active = Array.isArray(saved.GEN01) ? saved.GEN01.map(fold) : [];
+            const lastStage = MODULES.filter(module => active.includes(fold(module))).reduce((last, module) => last + Math.ceil(list.filter(q => fold(q.section) === fold(module)).length / PAGE_SIZE), 0);
+            setStage(Number.isSafeInteger(draft.stage) ? Math.min(lastStage, Math.max(0, draft.stage)) : 0);
+            setFinished(draft.finished === true && list.filter(q =>
+              applies(q.id, saved) && (q.id === 'GEN01' || active.includes(fold(q.section)))
+            ).every(q => !validation(q, saved[q.id], details[q.id] || '')));
+          } else {
+            setNotice('Recuperamos las respuestas compatibles. Revisa el formulario actualizado antes de finalizar.');
+          }
+        }
+      } catch {
+        setNotice('No se pudo leer el borrador guardado en este navegador.');
+      }
+      initialized.current = true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'No se pudo cargar el cuestionario.');
+    } finally {
+      setLoading(false);
     }
-    init();
-    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
-    if (!initialized.current || finished) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, otherTexts }));
-  }, [answers, otherTexts, finished]);
-
-  useEffect(() => {
-    if (finished && initialized.current) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, otherTexts }));
-        localStorage.setItem(FINISHED_KEY, 'true');
-      } catch {}
+    if (!initialized.current || !questions.length) return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ answers, otherTexts, stage, finished }));
+    } catch {
+      setStorageAvailable(false);
     }
-  }, [finished, answers, otherTexts]);
+  }, [answers, otherTexts, stage, finished, questions.length]);
+
+  function reset(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    if (!window.confirm('¿Borrar todas las respuestas de este navegador y empezar de nuevo? Descarga primero una copia si deseas conservarlas.')) return;
+    try {
+      for (const key of [DRAFT_KEY, STORAGE_KEY, LEGACY_FINISHED_KEY, 'copi-form-draft-v1', 'copi-form-draft-v2']) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      setStorageAvailable(false);
+    }
+    setAnswers({});
+    setOtherTexts({});
+    setStage(0);
+    setFinished(false);
+    setNotice('');
+    window.scrollTo(0, 0);
+  }
 
   const selected = Array.isArray(answers.GEN01) ? (answers.GEN01 as string[]) : [];
 
@@ -183,13 +211,32 @@ export default function Page() {
   }, [questions, selected]);
 
   const current = pages[Math.min(stage, Math.max(0, pages.length - 1))];
-  const completed = Object.values(answers).filter(
-    v => Array.isArray(v) ? v.length > 0 : String(v ?? '').trim().length > 0
-  ).length;
+  const completed = pages.flatMap(page => page.items).filter(q => {
+    const answer = answers[q.id];
+    return applies(q.id, answers) &&
+      (Array.isArray(answer) ? answer.length > 0 : String(answer ?? '').trim() !== '');
+  }).length;
 
   function change(q: Q, value: unknown) {
-    setAnswers(a => ({ ...a, [q.id]: value }));
+    setAnswers(a => {
+      const next = { ...a, [q.id]: value };
+      for (const dependent of ['INV02', 'FIN08', 'FAC03']) {
+        if (!applies(dependent, next)) delete next[dependent];
+      }
+      return next;
+    });
     setNotice('');
+  }
+
+  function changeCheckbox(q: Q, chosen: string[], option: string, checked: boolean) {
+    if (!checked) {
+      change(q, chosen.filter(value => value !== option));
+      return;
+    }
+    const exclusive = ['Ninguno por ahora', 'No sabemos'];
+    change(q, q.id === 'FAC12'
+      ? exclusive.includes(option) ? [option] : [...chosen.filter(value => !exclusive.includes(value)), option]
+      : [...chosen, option]);
   }
 
   function changeOther(id: string, value: string) {
@@ -202,29 +249,34 @@ export default function Page() {
     (answers[q.id] === 'Otro' || (Array.isArray(answers[q.id]) && (answers[q.id] as string[]).includes('Otro')));
 
   function goBack() {
-    if (stage === 0 || busy) return;
+    if (stage === 0) return;
     setStage(x => Math.max(0, x - 1));
     setNotice('Los cambios se guardan automáticamente en el navegador.');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function advance() {
-    if (!current || busy) return;
-    const missing = current.items.find(
-      q => q.required && (Array.isArray(answers[q.id]) ? !(answers[q.id] as unknown[]).length : String(answers[q.id] ?? '').trim() === '')
-    );
-    if (missing) {
-      setNotice('Completa la pregunta obligatoria: ' + missing.label);
-      document.getElementById(missing.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+    if (!current) return;
+    for (const q of current.items) {
+      if (!applies(q.id, answers)) continue;
+      const issue = validation(q, answers[q.id], otherTexts[q.id] || '');
+      if (issue) {
+        setNotice(issue);
+        document.getElementById(q.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
     }
-    if (stage === pages.length - 1) {
-      if (!window.confirm('¿Confirmas que terminaste? Después de finalizar no podrás editar las respuestas.')) return;
+    if (stage >= pages.length - 1) {
+      const invalid = pages.findIndex(page => page.items.some(q =>
+        applies(q.id, answers) && validation(q, answers[q.id], otherTexts[q.id] || '')
+      ));
+      if (invalid >= 0) {
+        setStage(invalid);
+        setNotice('Revisa las respuestas pendientes de este paso.');
+        return;
+      }
+      if (!window.confirm('¿Confirmas que terminaste? Revisa tus respuestas antes de finalizar.')) return;
       setFinished(true);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, otherTexts }));
-        localStorage.setItem(FINISHED_KEY, 'true');
-      } catch {}
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -232,201 +284,36 @@ export default function Page() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function exportPDF() {
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 40;
-    let y = 50;
-
-    // Logo placeholder / Brand
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(24);
-    doc.setTextColor(18, 158, 145);
-    doc.text('Nexus', margin, y);
-    doc.setTextColor(19, 42, 52);
-    doc.text('RD', margin + 55, y);
-
-    y += 30;
-    doc.setFontSize(10);
-    doc.setTextColor(103, 123, 130);
-    doc.text('Servicios digitales', margin, y);
-
-    y += 20;
-    doc.setDrawColor(221, 236, 234);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, pageWidth - margin, y);
-
-    y += 20;
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(19, 42, 52);
-    doc.text('Cuestionario de Requisitos — Copi Autopint', margin, y);
-
-    y += 18;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(103, 123, 130);
-    doc.text(`Generado: ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, y);
-    doc.text(`Versión: ${FORM_VERSION}`, margin + 200, y);
-
-    y += 25;
-
-    const selectedModules = selected.filter(m => m !== 'General').map(m => LABELS[m] || m).join(', ') || 'Ninguno';
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(19, 42, 52);
-    doc.text('Módulos seleccionados:', margin, y);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(103, 123, 130);
-    doc.text(selectedModules, margin + 110, y);
-
-    y += 25;
-
-    const allQuestions = pages.flatMap(p => p.items);
-    let qNum = 0;
-
-    for (const page of pages) {
-      if (page.items.length === 0) continue;
-
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(22, 158, 145);
-      doc.text(page.name, margin, y);
-      y += 10;
-      doc.setDrawColor(221, 236, 234);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 15;
-
-      for (const q of page.items) {
-        qNum++;
-        const answer = answers[q.id];
-        const other = otherTexts[q.id] || '';
-
-        let answerStr = '';
-        if (Array.isArray(answer)) {
-          answerStr = answer.length ? answer.join(', ') : '(sin respuesta)';
-          if (q.allowOther && answer.includes('Otro') && other) {
-            answerStr += ` (Otro: ${other})`;
-          }
-        } else if (answer !== undefined && String(answer).trim()) {
-          answerStr = String(answer);
-          if (q.allowOther && answer === 'Otro' && other) {
-            answerStr += ` (Otro: ${other})`;
-          }
-        } else {
-          answerStr = '(sin respuesta)';
-        }
-
-        // Question number and text
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(19, 42, 52);
-        const qLines = doc.splitTextToSize(`${qNum}. ${q.label}`, pageWidth - margin * 2);
-        for (const line of qLines) {
-          if (y > 750) { doc.addPage(); y = 50; }
-          doc.text(line, margin, y);
-          y += 14;
-        }
-
-        // Help text
-        if (q.help) {
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'italic');
-          doc.setTextColor(103, 123, 130);
-          const hLines = doc.splitTextToSize(q.help, pageWidth - margin * 2 - 20);
-          for (const line of hLines) {
-            if (y > 750) { doc.addPage(); y = 50; }
-            doc.text(line, margin + 10, y);
-            y += 12;
-          }
-        }
-
-        // Answer
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(19, 42, 52);
-        const aLines = doc.splitTextToSize(`Respuesta: ${answerStr}`, pageWidth - margin * 2 - 20);
-        for (const line of aLines) {
-          if (y > 750) { doc.addPage(); y = 50; }
-          doc.text(line, margin + 10, y);
-          y += 14;
-        }
-
-        // Example
-        if (q.example) {
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'italic');
-          doc.setTextColor(103, 123, 130);
-          const eLines = doc.splitTextToSize(`Ejemplo: ${q.example}`, pageWidth - margin * 2 - 20);
-          for (const line of eLines) {
-            if (y > 750) { doc.addPage(); y = 50; }
-            doc.text(line, margin + 10, y);
-            y += 12;
-          }
-        }
-
-        y += 10;
-      }
-      y += 10;
-    }
-
-    // Footer
-    const totalPages = (doc as any).getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(103, 123, 130);
-      doc.text(`NexusRD · ${FORM_VERSION} · Página ${i} de ${totalPages}`, pageWidth / 2, 810, { align: 'center' });
-    }
-
-    doc.save(`Cuestionario_Copi_Autopint_${new Date().toISOString().split('T')[0]}.pdf`);
+  function generatePDF() {
+    return makePDF(FORM_VERSION, selected, pages.map(page => ({
+      name: page.name,
+      items: page.items.map(q => {
+        const value = answers[q.id];
+        const values = Array.isArray(value) ? value : [value];
+        const detail = otherTexts[q.id]?.trim();
+        const text = values.filter(v => v !== undefined && String(v).trim()).map(v =>
+          v === 'Otro' && detail ? 'Otro: ' + detail : String(v)
+        ).join(', ');
+        return { id: q.id, label: q.label, answer: applies(q.id, answers) ? text || '(sin respuesta)' : NOT_APPLICABLE };
+      }),
+    })));
   }
 
-  function exportExcel() {
-    const allQuestions = pages.flatMap(p => p.items);
-    const rows = allQuestions.map((q, idx) => {
-      const answer = answers[q.id];
-      const other = otherTexts[q.id] || '';
+  function exportPDF() {
+    generatePDF().save(pdfName());
+  }
 
-      let answerStr = '';
-      if (Array.isArray(answer)) {
-        answerStr = answer.length ? answer.join(', ') : '';
-        if (q.allowOther && answer.includes('Otro') && other) {
-          answerStr += ` (Otro: ${other})`;
-        }
-      } else if (answer !== undefined && String(answer).trim()) {
-        answerStr = String(answer);
-        if (q.allowOther && answer === 'Otro' && other) {
-          answerStr += ` (Otro: ${other})`;
-        }
-      }
-
-      return {
-        Módulo: LABELS[q.section] || q.section,
-        'Nº Pregunta': idx + 1,
-        ID: q.id,
-        Pregunta: q.label,
-        Respuesta: answerStr,
-        Obligatoria: q.required ? 'Sí' : 'No',
-        Tipo: q.type,
-        Ayuda: q.help || '',
-        Ejemplo: q.example || '',
-      };
-    });
-
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Respuestas');
-    XLSX.writeFile(wb, `Cuestionario_Copi_Autopint_${new Date().toISOString().split('T')[0]}.xlsx`);
+  function pdfName() {
+    return `Cuestionario_Copi_Autopint_${new Date().toISOString().slice(0, 10)}.pdf`;
   }
 
   async function shareViaWhatsApp() {
-    const pdfBlob = await generatePDFBlob();
-    const file = new File([pdfBlob], `Cuestionario_Copi_Autopint_${new Date().toISOString().split('T')[0]}.pdf`, { type: 'application/pdf' });
+    const pdfBlob = generatePDF().output('blob');
+    const file = new File([pdfBlob], pdfName(), { type: 'application/pdf' });
 
     const message = 'Hola, NexusRD. Adjunto el cuestionario de requisitos completado de Copi Autopint.';
 
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
       try {
         await navigator.share({ files: [file], title: 'Cuestionario Copi Autopint', text: message });
         return;
@@ -449,156 +336,12 @@ export default function Page() {
     window.open(waUrl, '_blank', 'noopener,noreferrer');
   }
 
-  function generatePDFBlob(): Promise<Blob> {
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 40;
-    let y = 50;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(24);
-    doc.setTextColor(18, 158, 145);
-    doc.text('Nexus', margin, y);
-    doc.setTextColor(19, 42, 52);
-    doc.text('RD', margin + 55, y);
-
-    y += 30;
-    doc.setFontSize(10);
-    doc.setTextColor(103, 123, 130);
-    doc.text('Servicios digitales', margin, y);
-
-    y += 20;
-    doc.setDrawColor(221, 236, 234);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, pageWidth - margin, y);
-
-    y += 20;
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(19, 42, 52);
-    doc.text('Cuestionario de Requisitos — Copi Autopint', margin, y);
-
-    y += 18;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(103, 123, 130);
-    doc.text(`Generado: ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, y);
-    doc.text(`Versión: ${FORM_VERSION}`, margin + 200, y);
-
-    y += 25;
-
-    const selectedModules = selected.filter(m => m !== 'General').map(m => LABELS[m] || m).join(', ') || 'Ninguno';
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(19, 42, 52);
-    doc.text('Módulos seleccionados:', margin, y);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(103, 123, 130);
-    doc.text(selectedModules, margin + 110, y);
-
-    y += 25;
-
-    const allQuestions = pages.flatMap(p => p.items);
-    let qNum = 0;
-
-    for (const page of pages) {
-      if (page.items.length === 0) continue;
-
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(22, 158, 145);
-      doc.text(page.name, margin, y);
-      y += 10;
-      doc.setDrawColor(221, 236, 234);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 15;
-
-      for (const q of page.items) {
-        qNum++;
-        const answer = answers[q.id];
-        const other = otherTexts[q.id] || '';
-
-        let answerStr = '';
-        if (Array.isArray(answer)) {
-          answerStr = answer.length ? answer.join(', ') : '(sin respuesta)';
-          if (q.allowOther && answer.includes('Otro') && other) {
-            answerStr += ` (Otro: ${other})`;
-          }
-        } else if (answer !== undefined && String(answer).trim()) {
-          answerStr = String(answer);
-          if (q.allowOther && answer === 'Otro' && other) {
-            answerStr += ` (Otro: ${other})`;
-          }
-        } else {
-          answerStr = '(sin respuesta)';
-        }
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(19, 42, 52);
-        const qLines = doc.splitTextToSize(`${qNum}. ${q.label}`, pageWidth - margin * 2);
-        for (const line of qLines) {
-          if (y > 750) { doc.addPage(); y = 50; }
-          doc.text(line, margin, y);
-          y += 14;
-        }
-
-        if (q.help) {
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'italic');
-          doc.setTextColor(103, 123, 130);
-          const hLines = doc.splitTextToSize(q.help, pageWidth - margin * 2 - 20);
-          for (const line of hLines) {
-            if (y > 750) { doc.addPage(); y = 50; }
-            doc.text(line, margin + 10, y);
-            y += 12;
-          }
-        }
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(19, 42, 52);
-        const aLines = doc.splitTextToSize(`Respuesta: ${answerStr}`, pageWidth - margin * 2 - 20);
-        for (const line of aLines) {
-          if (y > 750) { doc.addPage(); y = 50; }
-          doc.text(line, margin + 10, y);
-          y += 14;
-        }
-
-        if (q.example) {
-          doc.setFontSize(8);
-          doc.setFont('helvetica', 'italic');
-          doc.setTextColor(103, 123, 130);
-          const eLines = doc.splitTextToSize(`Ejemplo: ${q.example}`, pageWidth - margin * 2 - 20);
-          for (const line of eLines) {
-            if (y > 750) { doc.addPage(); y = 50; }
-            doc.text(line, margin + 10, y);
-            y += 12;
-          }
-        }
-
-        y += 10;
-      }
-      y += 10;
-    }
-
-    const totalPages = (doc as any).getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(103, 123, 130);
-      doc.text(`NexusRD · ${FORM_VERSION} · Página ${i} de ${totalPages}`, pageWidth / 2, 810, { align: 'center' });
-    }
-
-    return Promise.resolve(doc.output('blob'));
-  }
-
   if (loading) {
     return (
       <main className="shell">
         <header className="topbar">
           <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" />
+            
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
           <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
@@ -618,7 +361,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" />
+            
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
           <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
@@ -642,7 +385,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
-            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" />
+            
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
           <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
@@ -653,16 +396,16 @@ export default function Page() {
           <div className="panel centered success">
             <div className="success-icon"><CheckCircle2 size={38} /></div>
             <h2>¡Cuestionario completado!</h2>
-            <p>Las respuestas se guardaron en tu navegador. Ahora puedes exportar los resultados.</p>
+            <p>{storageAvailable ? 'Las respuestas se guardaron en tu navegador.' : 'El navegador no permitió guardar las respuestas. Descarga una copia antes de cerrar.'}</p>
             <div className="actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '24px' }}>
               <button className="primary" onClick={exportPDF}><FileText size={18} /> Descargar PDF</button>
               <button className="primary" onClick={shareViaWhatsApp}><Share2 size={18} /> Enviar PDF al equipo de NexusRD</button>
             </div>
             <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
-              Los datos se almacenan solo en este navegador. Si limpias los datos del sitio, se perderán.
+              Los datos permanecen en este navegador. <a href="#" onClick={reset}>Borrar respuestas y empezar de nuevo</a>.
             </p>
             <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
-              Al enviar: se abrirá WhatsApp hacia el equipo de NexusRD (+1 829-521-0521). Si tu dispositivo no permite adjuntar el PDF, este se descargará para que lo adjuntes manualmente.
+              Si se abre el menú para compartir, elige WhatsApp y comprueba que el destinatario sea NexusRD (+1 829-521-0521). Si se descarga el PDF, adjúntalo al <a href={`https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer">chat oficial de NexusRD</a> y confirma el envío en WhatsApp.
             </p>
           </div>
         </div>
@@ -674,7 +417,7 @@ export default function Page() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
-          <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" />
+          
           <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
         </div>
         <span className="secure"><ShieldCheck size={16} /> Cuestionario de requisitos</span>
@@ -684,6 +427,8 @@ export default function Page() {
         <h1>Construyamos la solución <em>correcta.</em></h1>
         <p className="intro">Queremos entender cómo trabaja tu negocio para diseñar un sistema que realmente te facilite el día a día. Responde con tranquilidad: cada pregunta incluye orientación.</p>
 
+        {!storageAvailable && <p role="alert">El navegador no permite guardar el progreso. Descarga el PDF al terminar.</p>}
+        <p><a href="#" onClick={reset}>Borrar borrador y empezar de nuevo</a></p>
         <div className="progress-info">
           <span>Paso {Math.min(stage + 1, pages.length)} de {pages.length}</span>
           <span>{completed} respuestas en el formulario</span>
@@ -704,13 +449,13 @@ export default function Page() {
                 {q.required && <span className="required">*</span>}
               </label>
               {q.help && <p className="help">{q.help}</p>}
-              {q.id === 'GEN01' || q.type.includes('multiple') || q.type.includes('checkbox') || q.type.includes('multi') ? (
+              {!applies(q.id, answers) ? <p>{NOT_APPLICABLE}</p> : q.id === 'GEN01' || q.type.includes('multiple') || q.type.includes('checkbox') || q.type.includes('multi') ? (
                 <div className="options">
                   {(q.id === 'GEN01' && q.options.length === 0
                     ? ['Inventario', 'Nómina', 'Finanzas', 'Facturación']
                     : q.options
                   )
-                    .concat(q.allowOther ? ['Otro'] : [])
+                    .concat(q.allowOther && !q.options.includes('Otro') ? ['Otro'] : [])
                     .map(o => {
                       const chosen = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
                       return (
@@ -719,7 +464,7 @@ export default function Page() {
                             type="checkbox"
                             value={o}
                             checked={chosen.includes(o)}
-                            onChange={e => change(q, e.target.checked ? [...chosen, o] : chosen.filter(x => x !== o))}
+                            onChange={e => changeCheckbox(q, chosen, o, e.target.checked)}
                           />
                           <span className="check">{chosen.includes(o) && <Check size={14} />}</span>
                           {LABELS[fold(o) === 'nomina' ? 'Nomina' : fold(o) === 'facturacion' ? 'Facturacion' : o] ?? o}
@@ -729,6 +474,7 @@ export default function Page() {
                   {hasOther(q) && (
                     <textarea
                       rows={3}
+                      maxLength={MAX_TEXT}
                       value={otherTexts[q.id] || ''}
                       onChange={e => changeOther(q.id, e.target.value)}
                       placeholder="Especifica cuál…"
@@ -738,7 +484,7 @@ export default function Page() {
                 </div>
               ) : q.type === 'radio' || q.type.includes('select') || q.type.includes('opcion') || q.type.includes('lista') ? (
                 <div className="options">
-                  {q.options.concat(q.allowOther ? ['Otro'] : []).map(o => (
+                  {q.options.concat(q.allowOther && !q.options.includes('Otro') ? ['Otro'] : []).map(o => (
                     <label key={o} className={'option ' + (answers[q.id] === o ? 'selected' : '')}>
                       <input
                         type="radio"
@@ -754,6 +500,7 @@ export default function Page() {
                   {hasOther(q) && (
                     <textarea
                       rows={3}
+                      maxLength={MAX_TEXT}
                       value={otherTexts[q.id] || ''}
                       onChange={e => changeOther(q.id, e.target.value)}
                       placeholder="Especifica cuál…"
@@ -765,6 +512,8 @@ export default function Page() {
                 <input
                   id={'field-' + q.id}
                   type="number"
+                  min={0}
+                  step={1}
                   value={String(answers[q.id] ?? '')}
                   onChange={e => change(q, e.target.value === '' ? '' : Number(e.target.value))}
                   placeholder="Escribe un número…"
@@ -795,6 +544,7 @@ export default function Page() {
               ) : (
                 <textarea
                   id={'field-' + q.id}
+                  maxLength={MAX_TEXT}
                   rows={q.type.includes('largo') || q.type.includes('parrafo') || q.type.includes('párrafo') ? 5 : 3}
                   value={String(answers[q.id] ?? '')}
                   onChange={e => {
@@ -812,10 +562,10 @@ export default function Page() {
         </div>
 
         <div className="actions">
-          <button className="back" disabled={stage === 0 || busy} onClick={goBack}>
+          <button className="back" disabled={stage === 0} onClick={goBack}>
             <ArrowLeft size={17} /> Anterior
           </button>
-          <button className="primary" disabled={busy} onClick={advance}>
+          <button className="primary" onClick={advance}>
             {stage === pages.length - 1 ? <CheckCircle2 size={17} /> : <ArrowRight size={17} />}
             {stage === pages.length - 1 ? 'Finalizar cuestionario' : 'Guardar y continuar'}
           </button>

@@ -1,114 +1,31 @@
-#!/usr/bin/env node
-/**
- * Pruebas automatizadas para el formulario Copi Autopint (R5).
- * Detectan los problemas reportados en la auditoría:
- *  1. questions.json en public/ con ruta correcta para basePath.
- *  2. questions.json existe en el build out/.
- *  3. No hay número de WhatsApp ficticio.
- *  4. Persistencia de finalización con flag FINISHED_KEY.
- *  5. Workflow solo despliega desde main.
- */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const bank = require('../public/questions.json');
+const duplicate = require('../questions.json');
 
-const fs = require('fs');
-const path = require('path');
+test('56 identificadores únicos y distribución por módulo', () => {
+  assert.deepEqual(bank, duplicate);
+  assert.equal(bank.length, 56);
+  assert.equal(new Set(bank.map(q => q.id)).size, 56);
+  const counts = Object.fromEntries(['General','Inventario','Nomina','Finanzas','Facturacion'].map(section => [
+    section, bank.filter(q => q.section === section).length
+  ]));
+  assert.deepEqual(Object.values(counts), [1, 14, 13, 14, 14]);
+});
 
-const ROOT = path.join(__dirname, '..');
-const PUBLIC_JSON = path.join(ROOT, 'public', 'questions.json');
-const PAGE_TS = path.join(ROOT, 'app', 'page.tsx');
-const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'pages.yml');
-const OUT_DIR = path.join(ROOT, 'out');
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    const result = fn();
-    if (result === true) {
-      passed++;
-      console.log(`  ✓ ${name}`);
-    } else {
-      failed++;
-      console.log(`  ✗ ${name}`);
-    }
-    return true;
-  } catch (e) {
-    failed++;
-    console.log(`  ✗ ${name} — ${e.message}`);
-    return false;
+test('controles válidos, opciones distintas y un solo origen para Otro', () => {
+  for (const q of bank) {
+    assert.ok(q.question.startsWith('¿') && q.question.endsWith('?'), q.id);
+    assert.ok(['checkbox', 'radio', 'parrafo', 'numero'].includes(q.type), q.id);
+    assert.equal(new Set(q.options).size, q.options.length, q.id);
+    assert.ok(!q.options.includes('Otro'), q.id);
   }
-}
-
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg);
-}
-
-// ---- Tests ----
-console.log('\n— Pruebas: questions.json (public/) —');
-test('public/questions.json existe', () => fs.existsSync(PUBLIC_JSON));
-test('public/questions.json tiene 56 preguntas', () => {
-  const data = JSON.parse(fs.readFileSync(PUBLIC_JSON, 'utf8'));
-  return Array.isArray(data) && data.length === 56;
-});
-test('General tiene 1 pregunta', () => {
-  const data = JSON.parse(fs.readFileSync(PUBLIC_JSON, 'utf8'));
-  const general = data.filter(q => (q.section || '').toLowerCase() === 'general');
-  return general.length === 1;
-});
-test('Inventario tiene 14 preguntas', () => {
-  const data = JSON.parse(fs.readFileSync(PUBLIC_JSON, 'utf8'));
-  const inv = data.filter(q => (q.section || '').toLowerCase() === 'inventario');
-  return inv.length === 14;
-});
-test('Nomina tiene 13 preguntas', () => {
-  const data = JSON.parse(fs.readFileSync(PUBLIC_JSON, 'utf8'));
-  const nom = data.filter(q => (q.section || '').toLowerCase() === 'nomina');
-  return nom.length === 13;
-});
-test('Finanzas tiene 14 preguntas', () => {
-  const data = JSON.parse(fs.readFileSync(PUBLIC_JSON, 'utf8'));
-  const fin = data.filter(q => (q.section || '').toLowerCase() === 'finanzas');
-  return fin.length === 14;
-});
-test('Facturacion tiene 14 preguntas', () => {
-  const data = JSON.parse(fs.readFileSync(PUBLIC_JSON, 'utf8'));
-  const fac = data.filter(q => (q.section || '').toLowerCase() === 'facturacion');
-  return fac.length === 14;
 });
 
-console.log('\n— Pruebas: carga en app/page.tsx —');
-test('fetch usa ruta con basePath /copi-autopint-formulario', () => {
-  const content = fs.readFileSync(PAGE_TS, 'utf8');
-  return content.includes("fetch('/copi-autopint-formulario/questions.json'");
-});
-test('fetch NO usa ruta sin basePath /questions.json', () => {
-  const content = fs.readFileSync(PAGE_TS, 'utf8');
-  return !content.includes("fetch('/questions.json'");
-});
-test('no hay numero de WhatsApp ficticio 18095550000', () => {
-  const content = fs.readFileSync(PAGE_TS, 'utf8');
-  return !content.includes('18095550000');
-});
-test('usa FINISHED_KEY para persistencia de finalizacion', () => {
-  const content = fs.readFileSync(PAGE_TS, 'utf8');
-  return content.includes('FINISHED_KEY') && content.includes('copi-form-finished');
+test('el build contiene la página, el banco y los activos bajo el prefijo de Pages', () => {
+  const html = fs.readFileSync('out/index.html', 'utf8');
+  assert.match(html, /\/copi-autopint-formulario\/_next\//);
+  assert.deepEqual(require('../out/questions.json'), bank);
 });
 
-console.log('\n— Pruebas: workflow —');
-test('workflow solo despliega desde main', () => {
-  const content = fs.readFileSync(WORKFLOW, 'utf8');
-  const branchMatch = content.match(/branches:\s*\[([^\]]*)\]/);
-  const branches = branchMatch ? branchMatch[1] : '';
-  return branches.includes('main') && !branches.includes('feat/');
-});
-
-console.log('\n— Pruebas: build out/ —');
-test('build out/ existe', () => fs.existsSync(OUT_DIR));
-test('build out/questions.json existe', () => fs.existsSync(path.join(OUT_DIR, 'questions.json')));
-
-// ---- Summary ----
-console.log(`\nResultado: ${passed} pasadas, ${failed} fallidas`);
-if (failed > 0) {
-  process.exit(1);
-}
-process.exit(0);

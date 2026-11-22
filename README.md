@@ -1,31 +1,22 @@
-# Cuestionario Copi Autopint — NexusRD
+# Cuestionario Copi Autopint · NexusRD
 
-Sitio Next.js estático en GitHub Pages:
-https://nexusprord.github.io/copi-autopint-formulario/
+Cuestionario de levantamiento de requisitos para un taller dominicano. La aplicación estática carga el banco desde el código publicado y guarda un borrador en el mismo navegador, con el paso y las respuestas. El proceso no necesita Sheets ni Apps Script. Para abrir o recargar la página pública se requiere acceso al sitio.
 
-## Estado
+## Verificación y GitHub Pages
 
-- Preguntas desde Google Apps Script: operativo.
-- Guardado, reanudación desde Google Sheets y edición: **código web preparado; pendiente actualizar la implementación GAS y probar el ciclo real**.
-- Las respuestas se actualizan por ID de pregunta, no se agregan duplicados.
-- Se guardan al avanzar o retroceder entre etapas. Mientras se escribe, el borrador permanece en el navegador; no cerrar antes de guardar si se necesita sincronización inmediata.
-- La finalización requiere confirmación y bloquea nuevas modificaciones.
+En Node.js 22, ejecuta `npm ci`, `npm run lint`, `npm run build`, `npm test`, `npx playwright install chromium` y `npm run test:e2e`. Playwright sirve `out/` bajo el prefijo `/copi-autopint-formulario/`. Configura Pages con GitHub Actions como origen. El workflow verifica el PR y solo puede publicar desde `main` después de superar las verificaciones.
 
-## Paso obligatorio en Google Apps Script
+## Manejo del cuestionario
 
-1. Abre el proyecto Apps Script de Copi Autopint.
-2. Busca la función `function doGet(e)` que ya existe.
-3. **Reemplaza únicamente esa función** con el contenido de `gas/DOGET-PARA-REEMPLAZAR.gs`. No pegues una segunda función con el mismo nombre.
-4. Guarda y ve a **Implementar → Administrar implementaciones → Editar → Nueva versión → Implementar**. Actualiza la implementación cuyo enlace utiliza GitHub Pages.
-5. Abre `https://script.google.com/macros/s/<ID>/exec?accion=consultar` y comprueba que devuelve `ok:true`, `respuestas` y `estado`.
-6. Prueba guardar una respuesta y verificarla en Sheets. Después recarga la página y comprueba que reaparece.
+- Descarga una copia antes de borrar el borrador. El enlace de reinicio solicita confirmación. Evita responder con datos personales de clientes o trabajadores.
+- En el menú de compartir, elige WhatsApp y verifica el contacto NexusRD (+1 829-521-0521). Si el navegador descarga el PDF, adjúntalo manualmente en el chat oficial y confirma el envío en WhatsApp.
+- Las respuestas antiguas compatibles se conservan al actualizar. Las preguntas que cambiaron de sentido o de opciones deben revisarse antes de volver a finalizar.
 
-## Aviso importante de privacidad
+## Puntos para confirmar con el contador
 
-**Esta modalidad simplificada NO tiene autenticación.** Cualquiera que conozca el enlace de Apps Script puede leer, modificar o finalizar las respuestas. No es adecuada para datos fiscales o personales reales. No se ha expuesto `API_SECRET` ni `QUESTIONNAIRE_ID` en GitHub, pero el acceso público de lectura/escritura es deliberadamente abierto. Antes de usar con clientes reales, incorporar un mecanismo de acceso controlado.
+- FAC01–FAC04, FAC06–FAC08 y FAC10–FAC13. Confirma inscripción, autorización de emisión, datos del receptor, tipos y series autorizados, alcance de e-CF, ITBIS y procedimiento de corrección. Consulta la [clasificación de comprobantes de la DGII](https://dgii.gov.do/cicloContribuyente/facturacion/comprobantesFiscales/Paginas/tiposComprobantes.aspx).
+- NOM09. Confirma qué retenciones y recuperaciones aplican, junto con el registro separado de las contribuciones a cargo del empleador. Consulta las [preguntas frecuentes de la TSS](https://tss.gob.do/preguntas-frecuentes/).
+- FIN06, FIN08 y FIN09. Define tratamiento de desembolsos, asignación de costos y método para estimar el margen.
 
-## GitHub Pages
+El historial previo contiene una referencia al antiguo Apps Script. El propietario del servicio debe comprobar su configuración de acceso y retirar implementaciones públicas que ya no se usen. Esa acción pertenece a la cuenta de Google que administra el servicio.
 
-En Settings → Pages → Build and deployment → Source, seleccionar GitHub Actions. El workflow `.github/workflows/pages.yml` publica automáticamente.
-
-El logo se obtiene de la URL pública de NexusRD. No borrar la pestaña `Preguntas` al limpiar pruebas.
