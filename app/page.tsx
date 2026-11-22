@@ -377,11 +377,11 @@ export default function Page() {
               <button className="primary" onClick={exportPDF}><FileText size={18} /> Descargar PDF</button>
               <a className="primary" href={whatsappUrl} target="_blank" rel="noopener noreferrer"><Share2 size={18} /> Abrir WhatsApp del negocio</a>
             </div>
-            <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
-              Descarga el PDF primero y adjúntalo en el chat oficial. Los datos permanecen en este navegador. <a href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}>Borrar respuestas y empezar de nuevo</a>.
+            <p className="notice" style={{ marginTop: '16px', fontSize: '13px', color: '#526e75', lineHeight: 1.7 }}>
+              <strong>¿Cómo enviar tus respuestas?</strong> Primero pulsa «Descargar PDF». Después abre WhatsApp, busca el contacto del equipo de NexusRD (+1 829-521-0521) y adjunta el archivo descargado. También puedes pulsar «Abrir WhatsApp del negocio» para entrar directamente a nuestra conversación. Revisa el destinatario y pulsa Enviar en WhatsApp.
             </p>
             <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
-              Si se abre el menú para compartir, elige WhatsApp y comprueba que el destinatario sea NexusRD (+1 829-521-0521). Si se descarga el PDF, adjúntalo al <a href={`https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer">chat oficial de NexusRD</a> y confirma el envío en WhatsApp.
+              Tus respuestas permanecen guardadas en este navegador. <a href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}>Borrar respuestas y empezar de nuevo</a>.
             </p>
           </div>
         </div>
