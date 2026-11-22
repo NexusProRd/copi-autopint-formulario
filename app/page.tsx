@@ -341,6 +341,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
             
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
@@ -361,6 +362,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
             
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
@@ -385,6 +387,7 @@ export default function Page() {
       <main className="shell">
         <header className="topbar">
           <div className="brand">
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
             
             <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
           </div>
@@ -417,6 +420,7 @@ export default function Page() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
+            <img className="brand-logo" src="https://iyyeczoamsoiwujbwgjh.supabase.co/storage/v1/object/public/img_products/landing/logo.webp" alt="Logo de NexusRD" width={46} height={46} />
           
           <div><strong>Nexus<span>RD</span></strong><small>Servicios digitales</small></div>
         </div>
