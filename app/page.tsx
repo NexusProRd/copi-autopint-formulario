@@ -432,7 +432,7 @@ export default function Page() {
         <p className="intro">Queremos entender cómo trabaja tu negocio para diseñar un sistema que realmente te facilite el día a día. Responde con tranquilidad: cada pregunta incluye orientación.</p>
 
         {!storageAvailable && <p role="alert">El navegador no permite guardar el progreso. Descarga el PDF al terminar.</p>}
-        <div className="draft-actions"><a className="reset-draft" href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}><Trash2 size={14} aria-hidden="true" /> Borrar borrador y empezar de nuevo</a></div>
+        <div className="draft-actions"><button type="button" className="reset-draft" onClick={() => setShowResetModal(true)}><Trash2 size={14} aria-hidden="true" /> Borrar borrador y empezar de nuevo</button></div>
         <div className="progress-info">
           <span>Paso {Math.min(stage + 1, pages.length)} de {pages.length}</span>
           <span>{completed} respuestas en el formulario</span>
