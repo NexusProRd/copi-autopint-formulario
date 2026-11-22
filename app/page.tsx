@@ -306,32 +306,21 @@ export default function Page() {
     return `Cuestionario_Copi_Autopint_${new Date().toISOString().slice(0, 10)}.pdf`;
   }
 
-  async function shareViaWhatsApp() {
+  function shareViaWhatsApp() {
+    // El navegador no puede asignar destinatario al compartir un archivo con Web Share.
+    // Descargamos el PDF y abrimos el chat oficial directamente.
     const pdfBlob = generatePDF().output('blob');
-    const file = new File([pdfBlob], pdfName(), { type: 'application/pdf' });
-
-    const message = 'Hola, NexusRD. Adjunto el cuestionario de requisitos completado de Copi Autopint.';
-
-    if (navigator.share && navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: 'Cuestionario Copi Autopint', text: message });
-        return;
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return;
-      }
-    }
-
     const blobUrl = URL.createObjectURL(pdfBlob);
     const a = document.createElement('a');
     a.href = blobUrl;
-    a.download = file.name;
+    a.download = pdfName();
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 
+    const message = 'Hola, NexusRD. Ya completé el cuestionario de Copi Autopint. Adjunto el PDF descargado.';
     const waUrl = `https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-
     window.open(waUrl, '_blank', 'noopener,noreferrer');
   }
 
