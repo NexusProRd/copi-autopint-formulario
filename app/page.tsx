@@ -306,23 +306,8 @@ export default function Page() {
     return `Cuestionario_Copi_Autopint_${new Date().toISOString().slice(0, 10)}.pdf`;
   }
 
-  function shareViaWhatsApp() {
-    // El navegador no puede asignar destinatario al compartir un archivo con Web Share.
-    // Descargamos el PDF y abrimos el chat oficial directamente.
-    const pdfBlob = generatePDF().output('blob');
-    const blobUrl = URL.createObjectURL(pdfBlob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = pdfName();
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-
-    const message = 'Hola, NexusRD. Ya completé el cuestionario de Copi Autopint. Adjunto el PDF descargado.';
-    const waUrl = `https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
-  }
+  const whatsappMessage = 'Hola, NexusRD. Ya completé el cuestionario de Copi Autopint. Voy a adjuntar el PDF descargado.';
+  const whatsappUrl = `https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}?text=${encodeURIComponent(whatsappMessage)}`;
 
   if (loading) {
     return (
@@ -390,13 +375,13 @@ export default function Page() {
             <p>{storageAvailable ? 'Las respuestas se guardaron en tu navegador.' : 'El navegador no permitió guardar las respuestas. Descarga una copia antes de cerrar.'}</p>
             <div className="actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '24px' }}>
               <button className="primary" onClick={exportPDF}><FileText size={18} /> Descargar PDF</button>
-              <button className="primary" onClick={shareViaWhatsApp}><Share2 size={18} /> Enviar PDF al equipo de NexusRD</button>
+              <a className="primary" href={whatsappUrl} target="_blank" rel="noopener noreferrer"><Share2 size={18} /> Abrir WhatsApp del negocio</a>
             </div>
-            <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
-              Los datos permanecen en este navegador. <a href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}>Borrar respuestas y empezar de nuevo</a>.
+            <p className="notice" style={{ marginTop: '16px', fontSize: '13px', color: '#526e75', lineHeight: 1.7 }}>
+              <strong>¿Cómo enviar tus respuestas?</strong> Primero pulsa «Descargar PDF». Después abre WhatsApp, busca el contacto del equipo de NexusRD (+1 829-521-0521) y adjunta el archivo descargado. También puedes pulsar «Abrir WhatsApp del negocio» para entrar directamente a nuestra conversación. Revisa el destinatario y pulsa Enviar en WhatsApp.
             </p>
             <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
-              Si se abre el menú para compartir, elige WhatsApp y comprueba que el destinatario sea NexusRD (+1 829-521-0521). Si se descarga el PDF, adjúntalo al <a href={`https://wa.me/${OFFICIAL_WHATSAPP_NUMBER}`} target="_blank" rel="noopener noreferrer">chat oficial de NexusRD</a> y confirma el envío en WhatsApp.
+              Tus respuestas permanecen guardadas en este navegador. <a href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}>Borrar respuestas y empezar de nuevo</a>.
             </p>
           </div>
         </div>
