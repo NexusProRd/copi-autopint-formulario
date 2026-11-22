@@ -126,7 +126,7 @@ for (const modules of [bank[0].options, ...bank[0].options.map(module => [module
     await expect(wa).toHaveAttribute('rel', /noopener/);
     await expect(wa).toHaveAttribute('href', /^https:\/\/wa\.me\/18295210521\?text=/);
     if (all) {
-      const reset = page.getByRole('link', { name: /Borrar respuestas/ });
+      const reset = page.getByRole('button', { name: /Borrar respuestas/ });
       await reset.click();
       await expect(page.getByRole('heading', { name: '¿Empezar de nuevo?' })).toBeVisible();
       await page.getByRole('button', { name: 'Conservar respuestas' }).click();
@@ -138,6 +138,29 @@ for (const modules of [bank[0].options, ...bank[0].options.map(module => [module
     }
   });
 }
+
+test('La pantalla final permite borrar borrador mediante modal, sin confirmación nativa', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('copi-form-data-v4', JSON.stringify({
+      stage: 4, finished: true,
+      answers: { GEN01: ['Inventario'], INV01: 'No', INV03: ['Pinturas'], INV04: 'Menos de 20',
+        INV05: ['Compra'], INV06: 'Sí', INV07: ['Galón'], INV08: 'Sí', INV10: 'Sí',
+        INV11: ['Administrador'], INV12: 'Sí', INV13: ['Existencias actuales'], INV14: 'Control de materiales' }
+    }));
+  });
+  await page.goto('./');
+  const reset = page.getByRole('button', { name: 'Borrar respuestas y empezar de nuevo' });
+  await expect(reset).toBeVisible();
+  await reset.click();
+  await expect(page.getByRole('alertdialog', { name: '¿Empezar de nuevo?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Conservar respuestas' }).click();
+  await expect(page.getByRole('heading', { name: /Cuestionario completado/ })).toBeVisible();
+  await reset.click();
+  await page.getByRole('button', { name: 'Sí, borrar borrador' }).click();
+  await expect(page.getByRole('heading', { name: 'Servicios solicitados' })).toBeVisible();
+  await page.reload();
+  await expect(page.locator('#GEN01 input:checked')).toHaveCount(0);
+});
 
 test('WhatsApp abre enlace directo sin invocar el menú compartir', async ({ page }) => {
   await page.addInitScript(() => {
