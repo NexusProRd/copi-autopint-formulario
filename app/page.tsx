@@ -6,17 +6,18 @@ import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
 type Question = {
+  // Esquema con claves en español (legacy GAS) y esquema actual en minúsculas/en inglés (questions.json)
   ID?: string; id?: string;
-  Seccion?: string; seccion?: string;
-  Orden?: number; orden?: number;
-  Pregunta?: string; pregunta?: string;
-  Tipo?: string; tipo?: string;
-  Opciones?: string | string[]; opciones?: string | string[];
-  Obligatoria?: string | boolean; obligatoria?: string | boolean;
-  PermitirOtro?: string | boolean; permitirOtro?: string | boolean;
-  Ayuda?: string; ayuda?: string;
-  Ejemplo?: string; ejemplo?: string;
-  Condicion?: string; condicion?: string;
+  Seccion?: string; seccion?: string; section?: string;
+  Orden?: number; orden?: number; order?: number;
+  Pregunta?: string; pregunta?: string; question?: string;
+  Tipo?: string; tipo?: string; type?: string;
+  Opciones?: string | string[]; opciones?: string | string[]; options?: string | string[];
+  Obligatoria?: string | boolean; obligatoria?: string | boolean; required?: string | boolean;
+  PermitirOtro?: string | boolean; permitirOtro?: string | boolean; allowOther?: string | boolean;
+  Ayuda?: string; ayuda?: string; help?: string;
+  Ejemplo?: string; ejemplo?: string; example?: string;
+  Condicion?: string; condicion?: string; condition?: string;
 };
 
 type Q = {
@@ -39,24 +40,22 @@ const truth = (x: unknown) =>
   String(x).toLowerCase() === 'sí' ||
   String(x).toLowerCase() === 'true';
 
-const val = (q: Question, a: keyof Question, b: keyof Question) => q[a] ?? q[b];
-
 const normalize = (q: Question): Q => ({
-  id: String(val(q, 'ID', 'id') ?? ''),
-  section: String(val(q, 'Seccion', 'seccion') ?? ''),
-  order: Number(val(q, 'Orden', 'orden') ?? 0),
-  label: String(val(q, 'Pregunta', 'pregunta') ?? ''),
-  type: String(val(q, 'Tipo', 'tipo') ?? 'texto').toLowerCase(),
-  options: Array.isArray(val(q, 'Opciones', 'opciones'))
-    ? (val(q, 'Opciones', 'opciones') as string[])
-    : String(val(q, 'Opciones', 'opciones') ?? '')
+  id: String(q.id ?? q.ID ?? ''),
+  section: String(q.section ?? q.seccion ?? ''),
+  order: Number(q.order ?? q.orden ?? 0),
+  label: String(q.question ?? q.Pregunta ?? ''),
+  type: String(q.type ?? q.Tipo ?? 'texto').toLowerCase(),
+  options: Array.isArray(q.options ?? q.Opciones)
+    ? ((q.options ?? q.Opciones) as string[])
+    : String(q.options ?? q.Opciones ?? '')
         .split(/\s*[|;,]\s*/)
         .filter(Boolean),
-  required: truth(val(q, 'Obligatoria', 'obligatoria')),
-  allowOther: truth(val(q, 'PermitirOtro', 'permitirOtro')),
-  help: String(val(q, 'Ayuda', 'ayuda') ?? ''),
-  example: String(val(q, 'Ejemplo', 'ejemplo') ?? ''),
-  condition: String(val(q, 'Condicion', 'condicion') ?? ''),
+  required: truth(q.required ?? q.Obligatoria),
+  allowOther: truth(q.allowOther ?? q.PermitirOtro),
+  help: String(q.help ?? q.Ayuda ?? ''),
+  example: String(q.example ?? q.Ejemplo ?? ''),
+  condition: String(q.condition ?? q.Condicion ?? ''),
 });
 
 const MODULES = ['Inventario', 'Nomina', 'Finanzas', 'Facturacion'];
@@ -143,7 +142,11 @@ export default function Page() {
         setOtherTexts(localOther);
         setFinished(finishedFlag);
         if (finishedFlag) {
-          localStorage.removeItem(STORAGE_KEY);
+          // Consistencia: conservar las respuestas (STORAGE_KEY) y el estado finalizado (FINISHED_KEY).
+          try {
+            localStorage.setItem(FINISHED_KEY, 'true');
+          } catch {}
+        } else {
           localStorage.removeItem('copi-form-draft-v1');
           localStorage.removeItem('copi-form-draft-v2');
         }
@@ -624,6 +627,24 @@ export default function Page() {
 
   const whatsappConfigured = whatsappNumber.trim().length > 0 && whatsappNumber.replace(/\D/g, '').length >= 8;
 
+  const whatsappConfigPanel = showWhatsAppConfig ? (
+    <div className="panel" style={{ marginTop: '24px', background: '#f0f9f8', borderColor: '#129e91' }}>
+      <h3 style={{ marginTop: 0 }}>Configurar WhatsApp</h3>
+      <p className="help">Ingresa el número de WhatsApp (con código de país, sin + ni espacios). No se guarda en servidor; solo permanece en tu navegador.</p>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="tel"
+          value={whatsappNumber}
+          onChange={handleWhatsAppNumberChange}
+          placeholder="Número de WhatsApp (código de país + número)"
+          style={{ flex: 1, minWidth: '200px', padding: '10px 12px', border: '1px solid #dce8e8', borderRadius: '8px', fontSize: '14px' }}
+        />
+        <button className="primary" onClick={saveWhatsAppNumber}><Check size={16} /> Guardar</button>
+        <button className="secondary" onClick={() => setShowWhatsAppConfig(false)}>Cancelar</button>
+      </div>
+    </div>
+  ) : null;
+
   if (loading) {
     return (
       <main className="shell">
@@ -710,6 +731,8 @@ export default function Page() {
               </p>
             )}
           </div>
+
+          {whatsappConfigPanel}
         </div>
       </main>
     );
@@ -866,23 +889,7 @@ export default function Page() {
           </button>
         </div>
 
-        {showWhatsAppConfig && (
-          <div className="panel" style={{ marginTop: '24px', background: '#f0f9f8', borderColor: '#129e91' }}>
-            <h3 style={{ marginTop: 0 }}>Configurar WhatsApp</h3>
-            <p className="help">Ingresa el número de WhatsApp (con código de país, sin + ni espacios). No se guarda en servidor; solo permanece en tu navegador.</p>
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                type="tel"
-                value={whatsappNumber}
-                onChange={handleWhatsAppNumberChange}
-                placeholder="Número de WhatsApp (código de país + número)"
-                style={{ flex: 1, minWidth: '200px', padding: '10px 12px', border: '1px solid #dce8e8', borderRadius: '8px', fontSize: '14px' }}
-              />
-              <button className="primary" onClick={saveWhatsAppNumber}><Check size={16} /> Guardar</button>
-              <button className="secondary" onClick={() => setShowWhatsAppConfig(false)}>Cancelar</button>
-            </div>
-          </div>
-        )}
+        {whatsappConfigPanel}
 
         {!showWhatsAppConfig && !whatsappConfigured && (
           <div className="panel" style={{ marginTop: '24px', background: '#fff8f0', borderColor: '#e67e22' }}>
