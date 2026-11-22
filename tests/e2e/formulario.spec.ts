@@ -121,38 +121,38 @@ for (const modules of [bank[0].options, ...bank[0].options.map(module => [module
     }
     await page.reload();
     expect(await download(page, 'Descargar PDF')).toEqual(original);
-    expect(await download(page, 'Enviar PDF al equipo de NexusRD')).toEqual(original);
-    await expect(page.locator('body')).toHaveAttribute('data-whatsapp', /^https:\/\/wa.me\/18295210521\?text=/);
+    const wa = page.getByRole('link', { name: 'Abrir WhatsApp del negocio' });
+    await expect(wa).toHaveAttribute('target', '_blank');
+    await expect(wa).toHaveAttribute('rel', /noopener/);
+    await expect(wa).toHaveAttribute('href', /^https:\/\/wa\.me\/18295210521\?text=/);
     if (all) {
       const reset = page.getByRole('link', { name: /Borrar respuestas/ });
-      page.once('dialog', dialog => dialog.dismiss());
       await reset.click();
+      await expect(page.getByRole('heading', { name: '¿Empezar de nuevo?' })).toBeVisible();
+      await page.getByRole('button', { name: 'Conservar respuestas' }).click();
       await expect(page.getByRole('heading', { name: /Cuestionario completado/ })).toBeVisible();
-      page.once('dialog', dialog => dialog.accept());
       await reset.click();
+      await page.getByRole('button', { name: 'Sí, borrar borrador' }).click();
       await page.reload();
       await expect(page.locator('#GEN01 input:checked')).toHaveCount(0);
     }
   });
 }
 
-test('Compartir abre directamente el número oficial aunque Web Share esté disponible', async ({ page }) => {
+test('WhatsApp abre enlace directo sin invocar el menú compartir', async ({ page }) => {
   await page.addInitScript(() => {
-    const key = 'copi-form-data-v4';
-    const answers = { GEN01: ['Inventario'], INV01: 'No', INV03: ['Pinturas'], INV04: 'Menos de 20',
-      INV05: ['Compra'], INV06: 'Sí', INV07: ['Galón'], INV08: 'Sí', INV10: 'Sí', INV11: ['Administrador'],
-      INV12: 'Sí', INV13: ['Existencias actuales'], INV14: 'Control de materiales' };
-    localStorage.setItem(key, JSON.stringify({ stage: 4, answers, finished: true }));
-    Object.defineProperty(navigator, 'canShare', { value: () => true });
+    localStorage.setItem('copi-form-data-v4', JSON.stringify({
+      stage: 4, finished: true,
+      answers: { GEN01: ['Inventario'], INV01: 'No', INV03: ['Pinturas'], INV04: 'Menos de 20',
+        INV05: ['Compra'], INV06: 'Sí', INV07: ['Galón'], INV08: 'Sí', INV10: 'Sí',
+        INV11: ['Administrador'], INV12: 'Sí', INV13: ['Existencias actuales'], INV14: 'Control de materiales' }
+    }));
     Object.defineProperty(navigator, 'share', { value: () => { document.body.dataset.shared = 'called'; } });
-    window.open = url => { document.body.dataset.whatsapp = String(url); return null; };
   });
   await page.goto('./');
-  const promise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Enviar PDF al equipo de NexusRD' }).click();
-  const file = await promise;
-  expect(file.suggestedFilename()).toMatch(/^Cuestionario_Copi_Autopint_.*\.pdf$/);
-  await expect(page.locator('body')).toHaveAttribute('data-whatsapp', /^https:\/\/wa\.me\/18295210521\?text=/);
+  const link = page.getByRole('link', { name: 'Abrir WhatsApp del negocio' });
+  await expect(link).toHaveAttribute('href', /^https:\/\/wa\.me\/18295210521\?text=/);
+  await expect(link).toHaveAttribute('target', '_blank');
   await expect(page.locator('body')).not.toHaveAttribute('data-shared', 'called');
 });
 
