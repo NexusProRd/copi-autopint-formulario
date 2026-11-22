@@ -136,7 +136,7 @@ for (const modules of [bank[0].options, ...bank[0].options.map(module => [module
   });
 }
 
-test('Web Share recibe el PDF y permite cancelar sin abrir WhatsApp', async ({ page }) => {
+test('Compartir abre directamente el número oficial aunque Web Share esté disponible', async ({ page }) => {
   await page.addInitScript(() => {
     const key = 'copi-form-data-v4';
     const answers = { GEN01: ['Inventario'], INV01: 'No', INV03: ['Pinturas'], INV04: 'Menos de 20',
@@ -144,20 +144,17 @@ test('Web Share recibe el PDF y permite cancelar sin abrir WhatsApp', async ({ p
       INV12: 'Sí', INV13: ['Existencias actuales'], INV14: 'Control de materiales' };
     localStorage.setItem(key, JSON.stringify({ stage: 4, answers, finished: true }));
     Object.defineProperty(navigator, 'canShare', { value: () => true });
-    Object.defineProperty(navigator, 'share', { value: ({ files }: { files: File[] }) => {
-      document.body.dataset.shared = files[0].type + ':' + files[0].size;
-      throw new DOMException('Cancelado', 'AbortError');
-    } });
-    window.open = () => { document.body.dataset.whatsapp = 'abierto'; return null; };
+    Object.defineProperty(navigator, 'share', { value: () => { document.body.dataset.shared = 'called'; } });
+    window.open = url => { document.body.dataset.whatsapp = String(url); return null; };
   });
   await page.goto('./');
+  const promise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Enviar PDF al equipo de NexusRD' }).click();
-  await expect(page.locator('body')).toHaveAttribute('data-shared', /^application\/pdf:[1-9]\d+/);
-  await expect(page.locator('body')).not.toHaveAttribute('data-whatsapp', 'abierto');
-  await expect(page.getByRole('link', { name: /chat oficial/ })).toHaveAttribute('href', 'https://wa.me/18295210521');
+  const file = await promise;
+  expect(file.suggestedFilename()).toMatch(/^Cuestionario_Copi_Autopint_.*\.pdf$/);
+  await expect(page.locator('body')).toHaveAttribute('data-whatsapp', /^https:\/\/wa\.me\/18295210521\?text=/);
+  await expect(page.locator('body')).not.toHaveAttribute('data-shared', 'called');
 });
-
-
 
 test('dependencias de costos y autorización y selección excluyente', async ({ page }) => {
   await start(page, ['Finanzas', 'Facturación']);
