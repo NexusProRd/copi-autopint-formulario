@@ -1,3 +1,0 @@
-import {NextResponse} from 'next/server';
-export const dynamic='force-dynamic';
-export async function GET(){const url=process.env.GAS_WEB_APP_URL;if(!url)return NextResponse.json({error:'El formulario aún no está conectado a Google Apps Script.'},{status:503});try{const response=await fetch(url,{cache:'no-store',redirect:'follow'});const raw=await response.text();if(!response.ok)throw new Error('GAS GET '+response.status);const data=JSON.parse(raw);return NextResponse.json(data,{headers:{'Cache-Control':'no-store'}})}catch{return NextResponse.json({error:'No fue posible cargar las preguntas. Inténtalo más tarde.'},{status:502})}}
