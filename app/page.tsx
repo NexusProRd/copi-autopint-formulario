@@ -64,6 +64,7 @@ const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').t
 const PAGE_SIZE = 4;
 const FORM_VERSION = 'R5 · 22/11/2026';
 const STORAGE_KEY = 'copi-form-data-v3';
+const FINISHED_KEY = 'copi-form-finished';
 const LABELS: Record<string, string> = {
   Inventario: 'Inventario y materiales',
   Nomina: 'Nómina y personal',
@@ -76,7 +77,7 @@ function getWhatsAppNumber(): string {
     const stored = localStorage.getItem('copi-whatsapp-number');
     if (stored) return stored;
   }
-  return '18095550000';
+  return '';
 }
 
 function setWhatsAppNumber(num: string) {
@@ -103,7 +104,7 @@ export default function Page() {
     let alive = true;
     async function init() {
       try {
-        const res = await fetch('/questions.json', { cache: 'no-store' });
+        const res = await fetch('/copi-autopint-formulario/questions.json', { cache: 'no-store' });
         if (!res.ok) throw new Error('No se pudo cargar questions.json');
         const data: Question[] = await res.json();
         const list = data.map(normalize).filter((q: Q) => q.id && q.label).sort((a, b) => a.order - b.order);
@@ -123,6 +124,7 @@ export default function Page() {
 
         let local: Record<string, unknown> = {};
         let localOther: Record<string, string> = {};
+        let finishedFlag = false;
         try {
           const stored = localStorage.getItem(STORAGE_KEY);
           if (stored) {
@@ -130,13 +132,21 @@ export default function Page() {
             local = parsed.answers || {};
             localOther = parsed.otherTexts || {};
           }
+          if (typeof window !== 'undefined' && localStorage.getItem(FINISHED_KEY)) {
+            finishedFlag = true;
+          }
         } catch {}
 
         if (!alive) return;
         setQuestions(list);
         setAnswers(local);
         setOtherTexts(localOther);
-        setFinished(false);
+        setFinished(finishedFlag);
+        if (finishedFlag) {
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem('copi-form-draft-v1');
+          localStorage.removeItem('copi-form-draft-v2');
+        }
         initialized.current = true;
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'No se pudo cargar el cuestionario.');
@@ -152,6 +162,15 @@ export default function Page() {
     if (!initialized.current || finished) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, otherTexts }));
   }, [answers, otherTexts, finished]);
+
+  useEffect(() => {
+    if (finished && initialized.current) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, otherTexts }));
+        localStorage.setItem(FINISHED_KEY, 'true');
+      } catch {}
+    }
+  }, [finished, answers, otherTexts]);
 
   const selected = Array.isArray(answers.GEN01) ? (answers.GEN01 as string[]) : [];
 
@@ -214,7 +233,10 @@ export default function Page() {
     if (stage === pages.length - 1) {
       if (!window.confirm('¿Confirmas que terminaste? Después de finalizar no podrás editar las respuestas.')) return;
       setFinished(true);
-      localStorage.removeItem(STORAGE_KEY);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, otherTexts }));
+        localStorage.setItem(FINISHED_KEY, 'true');
+      } catch {}
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -411,18 +433,28 @@ export default function Page() {
   }
 
   async function shareViaWhatsApp() {
+    if (!whatsappConfigured) {
+      setNotice('Configura un número de WhatsApp válido antes de compartir. Actualmente no se ha configurado destinatario.');
+      setShowWhatsAppConfig(true);
+      return;
+    }
+
     const pdfBlob = await generatePDFBlob();
     const file = new File([pdfBlob], `Cuestionario_Copi_Autopint_${new Date().toISOString().split('T')[0]}.pdf`, { type: 'application/pdf' });
 
     const message = 'Hola, NexusRD. Adjunto el cuestionario de requisitos completado de Copi Autopint.';
-    const waUrl = `https://wa.me/${whatsappNumber.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
 
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({ files: [file], title: 'Cuestionario Copi Autopint', text: message });
         return;
-      } catch {}
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        // AbortError means user cancelled; continue to fallback
+      }
     }
+
+    const waUrl = `https://wa.me/${whatsappNumber.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
 
     window.open(waUrl, '_blank', 'noopener,noreferrer');
 
@@ -590,7 +622,7 @@ export default function Page() {
     setNotice('Número de WhatsApp guardado localmente.');
   }
 
-  const whatsappConfigured = whatsappNumber.length >= 10;
+  const whatsappConfigured = whatsappNumber.trim().length > 0 && whatsappNumber.replace(/\D/g, '').length >= 8;
 
   if (loading) {
     return (
@@ -656,21 +688,25 @@ export default function Page() {
             <div className="actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '24px' }}>
               <button className="primary" onClick={exportPDF}><FileText size={18} /> Descargar PDF</button>
               <button className="primary" onClick={exportExcel}><FileSpreadsheet size={18} /> Descargar Excel</button>
-              <button className="primary link-button" onClick={shareViaWhatsApp}><Share2 size={18} /> Compartir por WhatsApp</button>
+              {whatsappConfigured ? (
+                <button className="primary link-button" onClick={shareViaWhatsApp}><Share2 size={18} /> Compartir por WhatsApp</button>
+              ) : (
+                <button className="primary link-button" onClick={() => setShowWhatsAppConfig(true)}><Share2 size={18} /> Configurar y compartir</button>
+              )}
             </div>
             <p className="notice" style={{ marginTop: '16px', fontSize: '12px', color: '#677b82' }}>
               Los datos se almacenan solo en este navegador. Si limpias los datos del sitio, se perderán.
             </p>
             {whatsappConfigured && (
               <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#129e91' }}>
-                WhatsApp configurado: <code>+{whatsappNumber}</code>
+                WhatsApp configurado: <code>+{whatsappNumber.replace(/\D/g, '')}</code>
                 <button className="secondary" style={{ marginLeft: '12px', padding: '4px 8px', fontSize: '11px' }} onClick={() => setShowWhatsAppConfig(true)}>Cambiar</button>
               </p>
             )}
             {!whatsappConfigured && (
               <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#e67e22' }}>
-                Configura un número de WhatsApp para habilitar el envío directo.
-                <button className="secondary" style={{ marginLeft: '12px', padding: '4px 8px', fontSize: '11px' }} onClick={() => setShowWhatsAppConfig(true)}>Configurar</button>
+                Para compartir el PDF por WhatsApp: descarga el PDF, ábrelo con cualquier visor, compártelo desde la app de WhatsApp.
+                <button className="secondary" style={{ marginLeft: '12px', padding: '4px 8px', fontSize: '11px' }} onClick={() => setShowWhatsAppConfig(true)}>Configurar número</button>
               </p>
             )}
           </div>
@@ -833,13 +869,13 @@ export default function Page() {
         {showWhatsAppConfig && (
           <div className="panel" style={{ marginTop: '24px', background: '#f0f9f8', borderColor: '#129e91' }}>
             <h3 style={{ marginTop: 0 }}>Configurar WhatsApp</h3>
-            <p className="help">Ingresa el número de WhatsApp (con código de país, sin + ni espacios). Ejemplo para RD: 18095550000</p>
+            <p className="help">Ingresa el número de WhatsApp (con código de país, sin + ni espacios). No se guarda en servidor; solo permanece en tu navegador.</p>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
               <input
                 type="tel"
                 value={whatsappNumber}
                 onChange={handleWhatsAppNumberChange}
-                placeholder="18095550000"
+                placeholder="Número de WhatsApp (código de país + número)"
                 style={{ flex: 1, minWidth: '200px', padding: '10px 12px', border: '1px solid #dce8e8', borderRadius: '8px', fontSize: '14px' }}
               />
               <button className="primary" onClick={saveWhatsAppNumber}><Check size={16} /> Guardar</button>
@@ -853,7 +889,7 @@ export default function Page() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
               <AlertCircle size={20} style={{ color: '#e67e22' }} />
               <span style={{ flex: 1, minWidth: '200px' }}>
-                <strong>WhatsApp no configurado:</strong> el botón de compartir abrirá el chat pero no adjuntará el PDF automáticamente.
+                <strong>WhatsApp no configurado:</strong> para compartir el PDF descarga el archivo y úsalo desde la app de WhatsApp; luego abre el chat con tu cliente.
               </span>
               <button className="secondary" onClick={() => setShowWhatsAppConfig(true)}>Configurar número</button>
             </div>

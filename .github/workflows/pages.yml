@@ -1,7 +1,7 @@
 name: Publicar cuestionario en GitHub Pages
 on:
   push:
-    branches: [main, feat/offline-formulario]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
