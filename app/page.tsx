@@ -381,10 +381,24 @@ export default function Page() {
               <strong>¿Cómo enviar tus respuestas?</strong> Primero pulsa «Descargar PDF». Después abre WhatsApp, busca el contacto del equipo de NexusRD (+1 829-521-0521) y adjunta el archivo descargado. También puedes pulsar «Abrir WhatsApp del negocio» para entrar directamente a nuestra conversación. Revisa el destinatario y pulsa Enviar en WhatsApp.
             </p>
             <p className="notice" style={{ marginTop: '8px', fontSize: '12px', color: '#677b82' }}>
-              Tus respuestas permanecen guardadas en este navegador. <a href="#" onClick={event => { event.preventDefault(); setShowResetModal(true); }}>Borrar respuestas y empezar de nuevo</a>.
+              Tus respuestas permanecen guardadas en este navegador. <button type="button" className="reset-draft reset-draft-finished" onClick={() => setShowResetModal(true)}><Trash2 size={14} aria-hidden="true" /> Borrar respuestas y empezar de nuevo</button>.
             </p>
           </div>
         </div>
+      {showResetModal && (
+        <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowResetModal(false); }}>
+          <section className="reset-modal" role="alertdialog" aria-modal="true" aria-labelledby="reset-modal-title" aria-describedby="reset-modal-description">
+            <button type="button" className="modal-close" aria-label="Cerrar" onClick={() => setShowResetModal(false)}><X size={20} /></button>
+            <div className="modal-icon"><Trash2 size={24} /></div>
+            <h2 id="reset-modal-title">¿Empezar de nuevo?</h2>
+            <p id="reset-modal-description">Se borrarán las respuestas guardadas en este dispositivo. Esta acción no se puede deshacer. Si quieres conservarlas, descarga primero tu PDF.</p>
+            <div className="modal-actions">
+              <button type="button" className="modal-cancel" autoFocus onClick={() => setShowResetModal(false)}>Conservar respuestas</button>
+              <button type="button" className="modal-danger" onClick={reset}><Trash2 size={16} /> Sí, borrar borrador</button>
+            </div>
+          </section>
+        </div>
+      )}
       </main>
     );
   }
